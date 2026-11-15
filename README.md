@@ -117,6 +117,9 @@ Any of `lua`, `lua5.4`, `lua5.3`, `texlua` or `luajit` will do for the last
 one; `texlua` already comes with MacTeX, so check `which texlua` before
 installing anything.
 
+The converter window in step 1 checks all of these for you and says what is
+missing, so you can skip ahead and let it tell you.
+
 VitaSDK, with the libraries this game needs:
 
 ```sh
@@ -135,13 +138,30 @@ terminal. You also need about 2.5 GB of free disk space.
 
 ### Step 1 — convert the game data (about 15 minutes)
 
+Put `Tap Tap Revenge 3.ipa` in this folder, then open the converter:
+
+| | |
+|---|---|
+| **Windows** | double-click `Convert on Windows.bat` |
+| **macOS** | double-click `Convert on macOS.command` |
+| anywhere | `python3 tools/converter_gui.py` |
+
+A window opens, finds the `.ipa` (in this folder, or on your Desktop or in
+Downloads), checks that Pillow, ffmpeg and Lua are installed, and tells you
+how to get any that are missing. Press **Convert** and watch the bar; it ends
+with `Finished: 973 MB, 1621 files in app_data.`
+
+On macOS the first double-click may be refused as "unidentified developer" —
+right-click the file, choose Open, then Open again.
+
+Or do the same thing from a terminal:
+
 ```sh
-cd /path/to/this/repository
 python3 tools/prep_assets.py "/path/to/Tap Tap Revenge 3.ipa" app_data
 ```
 
-It prints its progress and ends with `343 songs ready, 0 still to convert`.
-You should now have an `app_data/` folder of about 973 MB and 1621 files:
+Either way you end up with an `app_data/` folder of about 973 MB and 1621
+files:
 
 ```
 app_data/songs.txt     the song list
@@ -152,8 +172,8 @@ app_data/gfx/  sfx/    menu graphics, font and two sounds
 app_data/icon0.png     the home screen icon, taken from the game
 ```
 
-The script can be interrupted and run again: songs already converted are
-kept. A song whose audio will not decode is skipped and named at the end.
+It can be interrupted and run again: songs already converted are kept. A song
+whose audio will not decode is skipped and named at the end.
 
 ### Step 2 — build the VPK (about a minute)
 
@@ -250,6 +270,7 @@ src/theme.c      loads and plays a song's theme (scenery, lanes, reactions)
 src/plat.h       platform interface
 src/plat_sdl.c   SDL2 backend: touch, buttons, Ogg music stream, WAV effects
 src/png_load.c   PNG decoding via libpng
+tools/converter_gui.py a window around prep_assets.py (the double-click apps)
 tools/prep_assets.py   .ipa -> app_data/ (songs.txt, charts, audio, themes, gfx, sfx)
 tools/theme_dump.lua   runs one theme script and logs what it sets up
 tools/theme_compile.py turns that log into app_data/themes/<name>/theme.txt

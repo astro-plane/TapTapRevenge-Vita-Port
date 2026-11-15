@@ -118,7 +118,8 @@ def build_themes(z, app, names, wanted, out, lua):
         z.extractall(td, members)
         root = os.path.join(td, app)
         common = os.path.join(root, 'Themes', 'Common.ttrTheme')
-        for theme in sorted(wanted):
+        for done_n, theme in enumerate(sorted(wanted)):
+            print('[themes %d/%d] %s' % (done_n + 1, len(wanted), theme), flush=True)
             tdir = os.path.join(root, 'Themes', theme + '.ttrTheme')
             if not os.path.isfile(os.path.join(tdir, 'theme.cfg')):
                 continue
@@ -237,6 +238,7 @@ def main():
 
     import threading
     zlock = threading.Lock()
+    counter = {'n': 0}
 
     def do_track(t):
         num = '%03d' % t['num']
@@ -283,8 +285,16 @@ def main():
         except Exception as e:           # one bad track must not stop the rest
             return 'error: %s' % e
 
+    def do_track_counted(t):
+        r = do_track(t)
+        with zlock:
+            counter['n'] += 1
+            print('[songs %d/%d] %s - %s%s' % (counter['n'], len(tracks), t['artist'], t['title'],
+                                               '' if not r or r == 'later' else '  (%s)' % r), flush=True)
+        return r
+
     with ThreadPoolExecutor(max_workers=max(1, a.jobs)) as ex:
-        results = list(ex.map(do_track, tracks))
+        results = list(ex.map(do_track_counted, tracks))
 
     # ---- themes: run each theme script once per difficulty level it is used at ----
     def theme_for(t, level):
