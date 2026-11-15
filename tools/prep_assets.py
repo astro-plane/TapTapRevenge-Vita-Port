@@ -13,6 +13,7 @@ Writes
                          by running the game's own theme scripts (needs a Lua
                          5.3/5.4 interpreter: lua, lua5.4 or texlua)
     out/gfx/*.png        menu background, HUD sheet and a generated font
+    out/icon0.png        the game's own icon, for the Vita's home screen
     out/sfx/*.wav        two menu sounds
 
 The script can be stopped and run again: songs already converted are kept.
@@ -182,6 +183,21 @@ def main():
     for name, src in gfx.items():
         Image.open(io.BytesIO(z.read(app + src))).convert('RGBA').save(os.path.join(out, 'gfx', name + '.png'))
     make_font(os.path.join(out, 'gfx', 'font.png'), os.path.join(out, 'gfx', 'font.txt'))
+
+    # ---- the app's own icon, for the Vita home screen ("skittle") ----------
+    icon = None
+    for cand in ('iTunesArtwork', app + 'iTunesArtwork', app + 'Icon@2x.png', app + 'Icon.png'):
+        if cand not in names:
+            continue
+        try:
+            im = Image.open(io.BytesIO(z.read(cand))).convert('RGB')
+        except Exception:
+            continue
+        if icon is None or im.size[0] > icon.size[0]:
+            icon = im
+    if icon is not None:                      # 128x128 is what the Vita wants
+        icon.resize((128, 128), Image.LANCZOS).save(os.path.join(out, 'icon0.png'))
+        print('  icon from %dx%d artwork' % icon.size)
     if ffmpeg:
         for name, src in {'click': 'TTRRotatingControlClick.wav', 'slide': 'menu_slide.wav'}.items():
             dst = os.path.join(out, 'sfx', name + '.wav')

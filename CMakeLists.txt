@@ -42,6 +42,13 @@ else()
     message(FATAL_ERROR "data/songs.txt not found - run tools/prep_assets.py first (see README.md).")
   endif()
 
+  # Home screen icon: the game's own, as extracted by prep_assets.py, falling
+  # back to the plain placeholder in sce_sys/ when data/ has not been built.
+  set(VITA_ICON "${CMAKE_SOURCE_DIR}/sce_sys/icon0.png")
+  if(EXISTS "${CMAKE_SOURCE_DIR}/data/icon0.png")
+    set(VITA_ICON "${CMAKE_SOURCE_DIR}/data/icon0.png")
+  endif()
+
   target_include_directories(ttrvita PRIVATE "$ENV{VITASDK}/arm-vita-eabi/include/SDL2")
   # Static libraries: order matters (vorbisfile -> vorbis -> ogg).
   # Packages: vdpm install sdl2 libpng zlib libvorbis libogg
@@ -56,7 +63,7 @@ else()
   vita_create_vpk(ttrvita.vpk ${VITA_TITLEID} ttrvita.self
     VERSION ${VITA_VERSION}
     NAME ${VITA_APP_NAME}
-    FILE sce_sys/icon0.png sce_sys/icon0.png
+    FILE ${VITA_ICON} sce_sys/icon0.png
     FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
     FILE sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
     FILE sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
