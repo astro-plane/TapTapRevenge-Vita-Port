@@ -164,8 +164,9 @@ tools/theme_dump.lua   runs one theme script and logs what it sets up
 tools/theme_compile.py turns that log into app_data/themes/<name>/theme.txt
 tools/pvrtc.py         decoder for PVRTC-compressed textures
 test/            headless renderer and scripted play-through
-sce_sys/         placeholder LiveArea images (the home screen icon comes from
-                 app_data/icon0.png when prep_assets.py has made it)
+sce_sys/         LiveArea files: the start-button image and template.xml (the
+                 home screen icon comes from app_data/icon0.png; bg.png is no
+                 longer packaged, so the LiveArea page has no wallpaper)
 ```
 
 ## Note
