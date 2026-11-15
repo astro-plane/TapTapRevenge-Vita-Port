@@ -256,7 +256,7 @@ int plat_init(int *screen_w, int *screen_h)
     mkdir("ux0:data/ttrvita", 0777);
     SDL_snprintf(save_file, sizeof save_file, "ux0:data/ttrvita/settings.txt");
     {
-        static const char *where[2] = { "ux0:data/ttrvita/data/", "app0:data/" };
+        static const char *where[2] = { "ux0:data/ttrvita/app_data/", "app0:app_data/" };
         char probe[640];
         int i;
         SDL_snprintf(data_dir, sizeof data_dir, "%s", where[0]);
@@ -271,12 +271,12 @@ int plat_init(int *screen_w, int *screen_h)
             }
         }
         if (i == 2)
-            fprintf(stderr, "no songs.txt found - copy the data folder to ux0:data/ttrvita/data/\n");
+            fprintf(stderr, "no songs.txt found - copy the app_data folder to ux0:data/ttrvita/app_data/\n");
     }
     (void)env;
 #else
     env = getenv("TTR_DATA");
-    SDL_snprintf(data_dir, sizeof data_dir, "%s", env ? env : "data/");
+    SDL_snprintf(data_dir, sizeof data_dir, "%s", env && env[0] ? env : "app_data/");
     if (data_dir[0] && data_dir[strlen(data_dir) - 1] != '/')
         SDL_strlcat(data_dir, "/", sizeof data_dir);
     SDL_snprintf(save_file, sizeof save_file, "ttrvita_settings.txt");

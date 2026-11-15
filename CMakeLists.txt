@@ -5,10 +5,10 @@ cmake_minimum_required(VERSION 3.16)
 # Desktop build (mouse + keyboard):
 #     cmake -S . -B build-pc -DDESKTOP=ON && cmake --build build-pc
 option(DESKTOP "Build for the host PC instead of the PS Vita" OFF)
-# Putting data/ inside the VPK makes it ~1 GB, which VitaShell needs well over
-# an hour to install.  By default the VPK holds only the program, and the data
-# folder is copied to ux0:data/ttrvita/data/ by hand (see README.md).
-option(EMBED_DATA "Pack data/ into the VPK (slow to install)" OFF)
+# Putting app_data/ inside the VPK makes it ~1 GB, which VitaShell needs well
+# over an hour to install.  By default the VPK holds only the program, and the
+# app_data folder is copied to ux0:data/ttrvita/app_data/ by hand (README.md).
+option(EMBED_DATA "Pack app_data/ into the VPK (slow to install)" OFF)
 
 if(NOT DESKTOP)
   if(NOT DEFINED ENV{VITASDK})
@@ -42,19 +42,19 @@ else()
   set(VITA_TITLEID  "TTRV00001")
   set(VITA_VERSION  "01.00")
 
-  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/data/songs.txt")
+  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/app_data/songs.txt")
     if(EMBED_DATA)
-      message(FATAL_ERROR "data/songs.txt not found - run tools/prep_assets.py first (see README.md).")
+      message(FATAL_ERROR "app_data/songs.txt not found - run tools/prep_assets.py first (see README.md).")
     endif()
-    message(WARNING "data/ has not been built yet: the VPK will use the placeholder icon, "
-                    "and the game needs data copied to ux0:data/ttrvita/data/ to run.")
+    message(WARNING "app_data/ has not been built yet: the VPK will use the placeholder "
+                    "icon, and the game needs app_data copied to ux0:data/ttrvita/app_data/.")
   endif()
 
   # Home screen icon: the game's own, as extracted by prep_assets.py, falling
-  # back to the plain placeholder in sce_sys/ when data/ has not been built.
+  # back to the plain placeholder in sce_sys/ when app_data/ has not been built.
   set(VITA_ICON "${CMAKE_SOURCE_DIR}/sce_sys/icon0.png")
-  if(EXISTS "${CMAKE_SOURCE_DIR}/data/icon0.png")
-    set(VITA_ICON "${CMAKE_SOURCE_DIR}/data/icon0.png")
+  if(EXISTS "${CMAKE_SOURCE_DIR}/app_data/icon0.png")
+    set(VITA_ICON "${CMAKE_SOURCE_DIR}/app_data/icon0.png")
   endif()
 
   target_include_directories(ttrvita PRIVATE "$ENV{VITASDK}/arm-vita-eabi/include/SDL2")
@@ -74,7 +74,7 @@ else()
     FILE sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
   )
   if(EMBED_DATA)
-    list(APPEND VPK_FILES FILE data data)
+    list(APPEND VPK_FILES FILE app_data app_data)
   endif()
 
   vita_create_self(ttrvita.self ttrvita)

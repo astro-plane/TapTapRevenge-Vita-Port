@@ -22,7 +22,7 @@ int plat_init(int *w, int *h) { *w = W; *h = H; return 0; }
 void plat_shutdown(void) {}
 void plat_poll(PlatInput *in) { (void)in; }
 double plat_time(void) { return soft_time; }
-const char *plat_data_dir(void) { const char *e = getenv("TTR_DATA"); return e ? e : "data/"; }
+const char *plat_data_dir(void) { const char *e = getenv("TTR_DATA"); return e && e[0] ? e : "app_data/"; }
 const char *plat_save_file(void) { return "/tmp/ttrvita_test_settings.txt"; }
 
 PlatTex *plat_tex_create(const unsigned char *rgba, int w, int h)

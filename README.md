@@ -3,7 +3,7 @@
 A from-scratch C reimplementation of the rhythm game's single-player mode for
 the PS Vita. It does not run or translate the iOS program. It plays the
 original note charts, music and per-song themes, which `tools/prep_assets.py`
-converts from your own copy of the `.ipa` into `data/`.
+converts from your own copy of the `.ipa` into `app_data/`.
 
 **Status:** game logic and drawing are tested on a PC with a headless renderer
 (see *Tests*). The Vita/SDL2 layer (`src/plat_sdl.c`), including music
@@ -99,24 +99,24 @@ The songs are copied across separately, once:
 
 1. Install `build/ttrvita.vpk` with VitaShell.
 2. Connect the Vita over USB (in VitaShell, press SELECT) and copy the whole
-   `data` folder to `ux0:data/ttrvita/`, so that the game finds
-   `ux0:data/ttrvita/data/songs.txt`.
+   `app_data` folder to `ux0:data/ttrvita/`, so that the game finds
+   `ux0:data/ttrvita/app_data/songs.txt`.
 
 Copying about 1 GB over USB takes a few minutes. Updating the program later is
 just a new VPK; the songs stay where they are. To change which songs are on
-the Vita, rebuild `data/` and copy it over again.
+the Vita, rebuild `app_data/` and copy it over again.
 
-For a smaller set of songs, regenerate `data/` with `--limit N`.
+For a smaller set of songs, regenerate `app_data/` with `--limit N`.
 
 `cmake -S . -B build -DEMBED_DATA=ON` packs the songs into the VPK instead.
 That makes a ~1 GB VPK which VitaShell needs well over an hour to unpack, so
 it is off by default.
 
-To regenerate `data/` (needs Python 3, Pillow, ffmpeg and a Lua 5.3/5.4
+To regenerate `app_data/` (needs Python 3, Pillow, ffmpeg and a Lua 5.3/5.4
 interpreter such as `lua` or `texlua`; about 15 minutes):
 
 ```sh
-python3 tools/prep_assets.py "/path/to/game.ipa" data
+python3 tools/prep_assets.py "/path/to/game.ipa" app_data
 ```
 
 The script can be stopped and rerun; finished songs are kept. Audio that does
@@ -131,7 +131,7 @@ If notes feel early or late against the music on the Vita, change
 ## Tests
 
 ```sh
-test/run_tests.sh data        # needs a C compiler and libpng headers
+test/run_tests.sh app_data   # needs a C compiler and libpng headers
 ```
 
 An auto-player hits every note of one song and the test checks the count,
@@ -146,16 +146,16 @@ src/theme.c      loads and plays a song's theme (scenery, lanes, reactions)
 src/plat.h       platform interface
 src/plat_sdl.c   SDL2 backend: touch, buttons, Ogg music stream, WAV effects
 src/png_load.c   PNG decoding via libpng
-tools/prep_assets.py   .ipa -> data/ (songs.txt, charts, audio, themes, gfx, sfx)
+tools/prep_assets.py   .ipa -> app_data/ (songs.txt, charts, audio, themes, gfx, sfx)
 tools/theme_dump.lua   runs one theme script and logs what it sets up
-tools/theme_compile.py turns that log into data/themes/<name>/theme.txt
+tools/theme_compile.py turns that log into app_data/themes/<name>/theme.txt
 tools/pvrtc.py         decoder for PVRTC-compressed textures
 test/            headless renderer and scripted play-through
 sce_sys/         placeholder LiveArea images (the home screen icon comes from
-                 data/icon0.png when prep_assets.py has made it)
+                 app_data/icon0.png when prep_assets.py has made it)
 ```
 
 ## Note
 
-The songs and art are commercial, licensed material. Keep `data/` and any VPK
+The songs and art are commercial, licensed material. Keep `app_data/` and any VPK
 built from it to yourself and your class; share only the source code.

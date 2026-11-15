@@ -1,6 +1,6 @@
 # Converted game data (songs, charts, artwork) is made locally from your own
 # copy of the game with tools/prep_assets.py and must not be committed.
-data/
+app_data/
 *.ipa
 *.vpk
 

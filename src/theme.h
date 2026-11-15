@@ -1,5 +1,5 @@
 /* theme.h - per-song themes: the scenery, lane shapes and reactions that the
- * original game's theme scripts set up, loaded from data/themes/<name>/. */
+ * original game's theme scripts set up, loaded from app_data/themes/<name>/. */
 #ifndef THEME_H
 #define THEME_H
 

@@ -41,7 +41,7 @@ void plat_draw(PlatTex *t, int sx, int sy, int sw, int sh, float cx, float cy,
                float w, float h, float angle_deg, unsigned rgba, int blend);
 void plat_fill(float x, float y, float w, float h, unsigned rgba);
 
-void plat_sfx(const char *name);             /* data/sfx/<name>.wav */
+void plat_sfx(const char *name);             /* app_data/sfx/<name>.wav */
 int plat_music_play(const char *path);       /* Ogg Vorbis; 0 on success */
 void plat_music_stop(void);
 void plat_music_pause(int paused);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-prep_assets.py - turn your own copy of the iOS game into the data/ folder
+prep_assets.py - turn your own copy of the iOS game into the app_data/ folder
 the Vita reimplementation reads.
 
     python3 prep_assets.py <game.ipa> <out_dir> [--limit N] [--jobs N] [--no-audio]
