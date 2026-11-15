@@ -1,0 +1,65 @@
+cmake_minimum_required(VERSION 3.16)
+
+# PS Vita build (default when VITASDK is set):
+#     cmake -S . -B build && cmake --build build          -> build/ttrvita.vpk
+# Desktop build (mouse + keyboard):
+#     cmake -S . -B build-pc -DDESKTOP=ON && cmake --build build-pc
+option(DESKTOP "Build for the host PC instead of the PS Vita" OFF)
+
+if(NOT DESKTOP)
+  if(NOT DEFINED ENV{VITASDK})
+    message(FATAL_ERROR "VITASDK is not set. Run: export VITASDK=/usr/local/vitasdk  (or pass -DDESKTOP=ON)")
+  endif()
+  if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VITASDK}/share/vita.toolchain.cmake" CACHE PATH "toolchain file")
+  endif()
+endif()
+
+project(ttrvita C)
+set(CMAKE_C_STANDARD 99)
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+add_executable(ttrvita src/main.c src/game.c src/theme.c src/png_load.c src/plat_sdl.c)
+target_compile_options(ttrvita PRIVATE -Wall)
+
+if(DESKTOP)
+  find_package(SDL2 REQUIRED)
+  find_package(PNG REQUIRED)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(VORBISFILE REQUIRED IMPORTED_TARGET vorbisfile)
+  target_include_directories(ttrvita PRIVATE ${SDL2_INCLUDE_DIRS})
+  target_link_libraries(ttrvita PRIVATE ${SDL2_LIBRARIES} PNG::PNG PkgConfig::VORBISFILE m)
+else()
+  include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
+
+  set(VITA_APP_NAME "Tap Tap Vita")
+  set(VITA_TITLEID  "TTRV00001")
+  set(VITA_VERSION  "01.00")
+
+  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/data/songs.txt")
+    message(FATAL_ERROR "data/songs.txt not found - run tools/prep_assets.py first (see README.md).")
+  endif()
+
+  target_include_directories(ttrvita PRIVATE "$ENV{VITASDK}/arm-vita-eabi/include/SDL2")
+  # Static libraries: order matters (vorbisfile -> vorbis -> ogg).
+  # Packages: vdpm install sdl2 libpng zlib libvorbis libogg
+  target_link_libraries(ttrvita
+    SDL2 vorbisfile vorbis ogg png z m
+    SceDisplay_stub SceCtrl_stub SceAudio_stub SceAudioIn_stub SceSysmodule_stub
+    SceGxm_stub SceCommonDialog_stub SceAppMgr_stub SceAppUtil_stub SceTouch_stub
+    SceHid_stub SceMotion_stub ScePower_stub SceIme_stub SceProcessmgr_stub
+  )
+
+  vita_create_self(ttrvita.self ttrvita)
+  vita_create_vpk(ttrvita.vpk ${VITA_TITLEID} ttrvita.self
+    VERSION ${VITA_VERSION}
+    NAME ${VITA_APP_NAME}
+    FILE sce_sys/icon0.png sce_sys/icon0.png
+    FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
+    FILE sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
+    FILE sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
+    FILE data data
+  )
+endif()

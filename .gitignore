@@ -1,0 +1,13 @@
+# Converted game data (songs, charts, artwork) is made locally from your own
+# copy of the game with tools/prep_assets.py and must not be committed.
+data/
+*.ipa
+*.vpk
+
+# build output and scratch files
+build/
+build-pc/
+test_out/
+__pycache__/
+.DS_Store
+ttrvita_settings.txt

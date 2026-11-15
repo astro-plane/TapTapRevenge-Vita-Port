@@ -1,0 +1,215 @@
+/* test_main.c - scripted play-through on the software renderer.
+ * Plays a song perfectly with an auto-player (reads the same chart file),
+ * then plays one with no input, and checks score, hits and misses. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "../src/game.h"
+
+extern int soft_render, soft_live_tex, soft_music_paused;
+extern double soft_time, soft_music;
+extern char soft_log[];
+void soft_dump(const char *path);
+
+static PlatInput in;
+static int prev_held;
+static const char *outdir = "/tmp";
+static int fails;
+
+typedef struct { float t, hold; int lane, shake; } TN;
+static TN tn[20000];
+static int ntn;
+
+static void frame(void)
+{
+    double dt = 1.0 / 60;
+    soft_time += dt;
+    if (soft_music >= 0 && !soft_music_paused) soft_music += dt;
+    in.pressed = in.held & ~prev_held;
+    prev_held = in.held;
+    game_frame(dt, &in);
+}
+
+static void run(double s) { double t; for (t = 0; t < s; t += 1.0 / 60) frame(); }
+static void press(int b) { in.held |= b; frame(); in.held &= ~b; frame(); }
+static void tap(float lx, float ly)
+{
+    in.n = 1; game_l2s(lx, ly, &in.t[0].x, &in.t[0].y); in.t[0].id = 1; frame(); frame();
+    in.n = 0; frame();
+}
+
+static void snap(const char *name)
+{
+    char p[512];
+    soft_render = 1; frame(); soft_render = 0;
+    snprintf(p, sizeof p, "%s/%s.png", outdir, name);
+    soft_dump(p);
+}
+
+static long field(const char *key)
+{
+    char buf[512], *p;
+    game_debug(buf, sizeof buf);
+    p = strstr(buf, key);
+    return p ? atol(p + strlen(key)) : -999;
+}
+
+static void say(const char *label)
+{
+    char buf[512];
+    game_debug(buf, sizeof buf);
+    printf("%-26s %s | sfx: %s\n", label, buf, soft_log);
+    soft_log[0] = 0;
+}
+
+static void check(const char *label, int ok)
+{
+    if (!ok) { printf("  ** FAIL: %s\n", label); fails++; }
+}
+
+static int keep_held;      /* leave buttons down after autoplay (to photograph a hold) */
+
+static int load_chart(const char *num, int level)
+{
+    char path[512], line[128];
+    int lv, cnt, inlv = 0;
+    FILE *f;
+    snprintf(path, sizeof path, "%scharts/%s.txt", getenv("TTR_DATA"), num);
+    f = fopen(path, "r");
+    if (!f) return -1;
+    ntn = 0;
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "level %d %d", &lv, &cnt) == 2) { if (inlv) break; inlv = lv == level; }
+        else if (inlv && ntn < 20000 && sscanf(line, "%f %d %d %f", &tn[ntn].t, &tn[ntn].lane, &tn[ntn].shake, &tn[ntn].hold) == 4) ntn++;
+    }
+    fclose(f);
+    return ntn;
+}
+
+/* play perfectly until the song ends (or max seconds) */
+static void autoplay(double max_s)
+{
+    static const int btn3[4] = { BTN_LEFT, BTN_UP, BTN_RIGHT, 0 }, btn4[4] = { BTN_LEFT, BTN_UP, BTN_SQUARE, BTN_CIRCLE };
+    const int *lane_btn = btn3;
+    double stop = soft_music + max_s;
+    int next = 0, release_at[4] = { 0, 0, 0, 0 }, k, snapped = 0;
+    float hold_end[4] = { -1, -1, -1, -1 };
+    for (k = 0; k < ntn; k++) if (tn[k].lane == 3) lane_btn = btn4;      /* a four-lane chart */
+    while (field("scene=") == 3 && soft_music < stop) {
+        double st = soft_music - 0.030;          /* what the game calls song time */
+        in.held &= ~(BTN_L | BTN_R);
+        for (k = 0; k < 4; k++) {
+            if (release_at[k] && --release_at[k] == 0) in.held &= ~lane_btn[k];
+            if (hold_end[k] >= 0 && st > hold_end[k]) { in.held &= ~lane_btn[k]; hold_end[k] = -1; }
+        }
+        while (next < ntn && tn[next].t <= st + 0.008) {
+            TN *n = &tn[next++];
+            if (n->shake) {
+                in.held |= n->lane == 2 ? BTN_R : BTN_L;
+                if (n->lane == 1 && (in.held & BTN_L) && 0) in.held |= BTN_L;
+            } else {
+                if (prev_held & lane_btn[n->lane]) {       /* must lift before tapping again */
+                    in.held &= ~lane_btn[n->lane]; frame();
+                }
+                in.held |= lane_btn[n->lane];
+                if (n->hold > 0) { hold_end[n->lane] = n->t + n->hold - 0.02f; release_at[n->lane] = 0; }
+                else release_at[n->lane] = 3;
+            }
+        }
+        frame();
+        if (!snapped && soft_music > 30) { snapped = 1; snap("04_playing"); say("30 s in"); }
+    }
+    if (!keep_held) in.held = 0;
+}
+
+int main(int argc, char **argv)
+{
+    int w, h, notes, i;
+    long sc;
+    if (argc > 1) outdir = argv[1];
+    remove("/tmp/ttrvita_test_settings.txt");
+    plat_init(&w, &h);
+    if (game_init(w, h) != 0) { printf("init failed\n"); return 1; }
+
+    if (argc > 2) {                       /* quick look at one song: test <outdir> <song index> */
+        char num[8], name[32];
+        int song = atoi(argv[2]);
+        run(0.3); tap(160, 300); run(0.2);
+        for (i = 0; i < song; i++) press(BTN_DOWN);
+        press(BTN_CROSS); press(BTN_CROSS); run(0.05);
+        snprintf(num, sizeof num, "%03d", song + 1);
+        load_chart(num, (int)field("level="));
+        keep_held = 1;
+        autoplay(argc > 3 ? atof(argv[3]) : 24);
+        snprintf(name, sizeof name, "song_%s", num);
+        snap(name); say(name);
+        game_shutdown();
+        return 0;
+    }
+    run(0.3); snap("01_title"); say("title");
+    tap(160, 300); run(0.2); snap("02_list"); say("list");
+    check("on song list", field("scene=") == 1);
+    for (i = 0; i < 3; i++) press(BTN_DOWN);
+    check("cursor moved", field("song=") == 3);
+    for (i = 0; i < 3; i++) press(BTN_UP);
+
+    /* song 1, its first listed level: perfect auto-play */
+    press(BTN_CROSS); run(0.1); snap("03_level"); say("level select");
+    check("on level select", field("scene=") == 2);
+    press(BTN_CROSS); run(0.05);
+    check("playing", field("scene=") == 3);
+    notes = load_chart("001", (int)field("level="));
+    printf("chart has %d notes\n", notes);
+    check("notes loaded", notes > 0 && field("notes=") == notes);
+    autoplay(400);
+    snap("05_result"); say("result (perfect)");
+    check("result screen", field("scene=") == 4);
+    check("every note hit", field("hit=") == notes && field("judged=") == notes);
+    check("streak equals notes", field("best=") == notes);
+    sc = field("score=");
+    check("score sensible", sc >= 100L * notes);
+
+    /* song 2: no input at all - everything should be missed */
+    press(BTN_CROSS); run(0.1);
+    press(BTN_DOWN); press(BTN_CROSS); run(0.1); press(BTN_CROSS);
+    notes = load_chart("002", (int)field("level="));
+    run(12); snap("06_misses"); say("12 s, hands off");
+    in.held = BTN_START; frame(); in.held = 0; frame(); snap("07_paused"); say("paused");
+    check("paused", field("paused=") == 1);
+    { double m = soft_music; run(1); check("music held while paused", soft_music == m); }
+    in.held = BTN_START; frame(); in.held = 0; frame();
+    run(1000);
+    say("song 2 finished");
+    check("song 2 result", field("scene=") == 4);
+    check("nothing hit", field("hit=") == 0 && field("judged=") == notes && field("score=") == 0);
+
+    /* vertical layout */
+    press(BTN_CROSS); press(BTN_SELECT); run(0.2); snap("08_tate_list");
+    press(BTN_CROSS); press(BTN_CROSS);
+    notes = load_chart("002", (int)field("level="));
+    autoplay(20); snap("09_tate_play"); say("tate 20 s");
+    check("tate hits", field("hit=") > 0 && field("hit=") == field("judged="));
+    in.held = BTN_START; frame(); in.held = 0; frame();
+    press(BTN_CIRCLE); run(0.1);
+    check("quit to list", field("scene=") == 1);
+
+    /* flick the list: it should keep gliding after the finger lifts, then stop */
+    {
+        long before_scene = field("scene=");
+        int k;
+        in.n = 1; in.t[0].id = 1;
+        for (k = 0; k < 6; k++) { game_l2s(160, 400 - k * 40.0f, &in.t[0].x, &in.t[0].y); frame(); }
+        in.n = 0; frame();
+        snap("11_flick_a"); run(0.5); snap("11_flick_b"); run(6.0); snap("11_flick_c"); run(1.0); snap("11_flick_d");
+        check("flick stays on the list", field("scene=") == before_scene && before_scene == 1);
+    }
+
+    /* scroll to the end of the list */
+    for (i = 0; i < 400; i++) press(BTN_R);
+    snap("10_list_end"); say("list end");
+
+    game_shutdown();
+    printf("textures alive after shutdown: %d\n", soft_live_tex);
+    printf(fails ? "%d CHECK(S) FAILED\n" : "all checks passed\n", fails);
+    return fails != 0;
+}
