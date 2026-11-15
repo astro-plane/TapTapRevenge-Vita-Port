@@ -5,6 +5,10 @@ cmake_minimum_required(VERSION 3.16)
 # Desktop build (mouse + keyboard):
 #     cmake -S . -B build-pc -DDESKTOP=ON && cmake --build build-pc
 option(DESKTOP "Build for the host PC instead of the PS Vita" OFF)
+# Putting data/ inside the VPK makes it ~1 GB, which VitaShell needs well over
+# an hour to install.  By default the VPK holds only the program, and the data
+# folder is copied to ux0:data/ttrvita/data/ by hand (see README.md).
+option(EMBED_DATA "Pack data/ into the VPK (slow to install)" OFF)
 
 if(NOT DESKTOP)
   if(NOT DEFINED ENV{VITASDK})
@@ -39,7 +43,11 @@ else()
   set(VITA_VERSION  "01.00")
 
   if(NOT EXISTS "${CMAKE_SOURCE_DIR}/data/songs.txt")
-    message(FATAL_ERROR "data/songs.txt not found - run tools/prep_assets.py first (see README.md).")
+    if(EMBED_DATA)
+      message(FATAL_ERROR "data/songs.txt not found - run tools/prep_assets.py first (see README.md).")
+    endif()
+    message(WARNING "data/ has not been built yet: the VPK will use the placeholder icon, "
+                    "and the game needs data copied to ux0:data/ttrvita/data/ to run.")
   endif()
 
   # Home screen icon: the game's own, as extracted by prep_assets.py, falling
@@ -59,14 +67,20 @@ else()
     SceHid_stub SceMotion_stub ScePower_stub SceIme_stub SceProcessmgr_stub
   )
 
-  vita_create_self(ttrvita.self ttrvita)
-  vita_create_vpk(ttrvita.vpk ${VITA_TITLEID} ttrvita.self
-    VERSION ${VITA_VERSION}
-    NAME ${VITA_APP_NAME}
+  set(VPK_FILES
     FILE ${VITA_ICON} sce_sys/icon0.png
     FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
     FILE sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
     FILE sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
-    FILE data data
+  )
+  if(EMBED_DATA)
+    list(APPEND VPK_FILES FILE data data)
+  endif()
+
+  vita_create_self(ttrvita.self ttrvita)
+  vita_create_vpk(ttrvita.vpk ${VITA_TITLEID} ttrvita.self
+    VERSION ${VITA_VERSION}
+    NAME ${VITA_APP_NAME}
+    ${VPK_FILES}
   )
 endif()

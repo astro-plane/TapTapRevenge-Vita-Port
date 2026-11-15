@@ -248,10 +248,31 @@ int plat_init(int *screen_w, int *screen_h)
         return -1;
     }
 #ifdef __vita__
-    SDL_snprintf(data_dir, sizeof data_dir, "app0:data/");
+    /* The songs live on the memory card rather than inside the app: a VPK
+     * holding ~1 GB takes VitaShell well over an hour to unpack, while
+     * copying the folder over USB takes a few minutes.  app0: is still used
+     * when the data was built into the VPK (cmake -DEMBED_DATA=ON). */
     mkdir("ux0:data", 0777);
     mkdir("ux0:data/ttrvita", 0777);
     SDL_snprintf(save_file, sizeof save_file, "ux0:data/ttrvita/settings.txt");
+    {
+        static const char *where[2] = { "ux0:data/ttrvita/data/", "app0:data/" };
+        char probe[640];
+        int i;
+        SDL_snprintf(data_dir, sizeof data_dir, "%s", where[0]);
+        for (i = 0; i < 2; i++) {
+            FILE *f;
+            SDL_snprintf(probe, sizeof probe, "%ssongs.txt", where[i]);
+            f = fopen(probe, "r");
+            if (f) {
+                fclose(f);
+                SDL_snprintf(data_dir, sizeof data_dir, "%s", where[i]);
+                break;
+            }
+        }
+        if (i == 2)
+            fprintf(stderr, "no songs.txt found - copy the data folder to ux0:data/ttrvita/data/\n");
+    }
     (void)env;
 #else
     env = getenv("TTR_DATA");

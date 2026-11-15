@@ -89,9 +89,25 @@ cmake -S . -B build
 cmake --build build          # -> build/ttrvita.vpk
 ```
 
-The VPK is about 850 MB with all songs, so copy it to the Vita over USB rather
-than FTP and allow several minutes for VitaShell to install it. For a smaller
-build, regenerate `data/` with `--limit N`.
+### Putting it on the Vita
+
+The VPK holds only the program (a few hundred kB) and installs in seconds.
+The songs are copied across separately, once:
+
+1. Install `build/ttrvita.vpk` with VitaShell.
+2. Connect the Vita over USB (in VitaShell, press SELECT) and copy the whole
+   `data` folder to `ux0:data/ttrvita/`, so that the game finds
+   `ux0:data/ttrvita/data/songs.txt`.
+
+Copying about 1 GB over USB takes a few minutes. Updating the program later is
+just a new VPK; the songs stay where they are. To change which songs are on
+the Vita, rebuild `data/` and copy it over again.
+
+For a smaller set of songs, regenerate `data/` with `--limit N`.
+
+`cmake -S . -B build -DEMBED_DATA=ON` packs the songs into the VPK instead.
+That makes a ~1 GB VPK which VitaShell needs well over an hour to unpack, so
+it is off by default.
 
 To regenerate `data/` (needs Python 3, Pillow, ffmpeg and a Lua 5.3/5.4
 interpreter such as `lua` or `texlua`; about 15 minutes):
