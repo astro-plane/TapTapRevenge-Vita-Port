@@ -17,8 +17,6 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
   streaks, multipliers and misses
 - Three lanes with tap notes, hold notes and shake arrows, timed to the music
   (four lanes in the one theme that has them)
-- Sideways themes: one theme is laid out for a phone held sideways (480x320);
-  it is shown the normal way up on the Vita, whatever the layout setting
 - Score, streak, 2x/3x/4x multipliers, and an 8x "revenge" mode
 - Landscape and vertical layouts, pause
 
