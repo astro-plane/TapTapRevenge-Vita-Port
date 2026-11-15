@@ -83,63 +83,154 @@ This project's own choices (constants at the top of `src/game.c`):
 
 In the vertical layout, hold the Vita turned a quarter turn clockwise.
 
-## Build
+## What you need
 
-Needs VitaSDK with these packages: `vdpm install sdl2 libpng zlib libvorbis libogg`
+### 1. The game
+
+One file: **`Tap Tap Revenge 3.ipa`**, version 3.4.1 (bundle id
+`com.tapulous.taptaprevengeIII`), about 1 GB. Nothing else from the game is
+needed, and nothing in this repository comes from it.
+
+It must be Tap Tap Revenge **3**, and it must still carry its songs: some
+copies have an empty `Tracks` folder because the songs were downloaded
+separately. Check before you start:
 
 ```sh
+unzip -Z1 "Tap Tap Revenge 3.ipa" | grep -c taptrack.ttr2_track
+```
+
+A good copy prints **344**. Zero means the songs are missing; a much smaller
+number means a partial copy. The archive should also contain
+`Payload/Tap Tap.app/` with `Tracks/` and `Themes/` folders inside.
+
+### 2. Tools on your computer
+
+| Tool | What it is for | macOS |
+|---|---|---|
+| VitaSDK | compiles for the Vita | see below |
+| CMake 3.16+ | runs the build | `brew install cmake` |
+| Python 3.8+ with Pillow | converts the artwork and charts | `pip3 install pillow` |
+| ffmpeg | converts the songs to Ogg Vorbis | `brew install ffmpeg` |
+| Lua 5.3 or 5.4 | runs the game's own theme scripts | `brew install lua` |
+
+Any of `lua`, `lua5.4`, `lua5.3`, `texlua` or `luajit` will do for the last
+one; `texlua` already comes with MacTeX, so check `which texlua` before
+installing anything.
+
+VitaSDK, with the libraries this game needs:
+
+```sh
+cd ~
+git clone https://github.com/vitasdk/vdpm ~/vdpm
+cd ~/vdpm && ./bootstrap-vitasdk.sh
 export VITASDK=/usr/local/vitasdk
 export PATH=$VITASDK/bin:$PATH
-cmake -S . -B build
-cmake --build build          # -> build/ttrvita.vpk
+vdpm install sdl2 libpng zlib libvorbis libogg
 ```
 
-### Putting it on the Vita
+Put those two `export` lines in your `~/.zshrc` so they survive a new
+terminal. You also need about 2.5 GB of free disk space.
 
-The VPK holds only the program (a few hundred kB) and installs in seconds.
-The songs are copied across separately, once:
+## Build and install
 
-1. Install `build/ttrvita.vpk` with VitaShell.
-2. Connect the Vita over USB (in VitaShell, press SELECT) and copy the whole
-   `app_data` folder to `ux0:data/ttrvita/`, so that the game finds
-   `ux0:data/ttrvita/app_data/songs.txt`.
-
-Copying about 1 GB over USB takes a few minutes. Updating the program later is
-just a new VPK; the songs stay where they are. To change which songs are on
-the Vita, rebuild `app_data/` and copy it over again.
-
-For a smaller set of songs, regenerate `app_data/` with `--limit N`.
-
-`cmake -S . -B build -DEMBED_DATA=ON` packs the songs into the VPK instead.
-That makes a ~1 GB VPK which VitaShell needs well over an hour to unpack, so
-it is off by default.
-
-To regenerate `app_data/` (needs Python 3, Pillow, ffmpeg and a Lua 5.3/5.4
-interpreter such as `lua` or `texlua`; about 15 minutes):
+### Step 1 — convert the game data (about 15 minutes)
 
 ```sh
-python3 tools/prep_assets.py "/path/to/game.ipa" app_data
+cd /path/to/this/repository
+python3 tools/prep_assets.py "/path/to/Tap Tap Revenge 3.ipa" app_data
 ```
 
-The script can be stopped and rerun; finished songs are kept. Audio that does
-not decode as-is is skipped; nothing is decrypted.
+It prints its progress and ends with `343 songs ready, 0 still to convert`.
+You should now have an `app_data/` folder of about 973 MB and 1621 files:
 
-If VitaShell refuses the VPK with error `0x8010113D`, a LiveArea image is not
-an 8-bit indexed PNG: everything in `sce_sys/` and `app_data/icon0.png` has to
-be saved that way (what `pngquant` does), which prep_assets.py and the
-placeholders already do.
+```
+app_data/songs.txt     the song list
+app_data/charts/       343 note charts
+app_data/audio/        343 songs as .ogg
+app_data/themes/       120 themes
+app_data/gfx/  sfx/    menu graphics, font and two sounds
+app_data/icon0.png     the home screen icon, taken from the game
+```
 
-Shake sensitivity is `SHAKE_G` near the top of `src/plat_sdl.c` (lower = a
-lighter shake registers).
+The script can be interrupted and run again: songs already converted are
+kept. A song whose audio will not decode is skipped and named at the end.
 
-If notes feel early or late against the music on the Vita, change
-`AUDIO_LATENCY` in `src/game.c` (seconds; larger = notes arrive later).
+### Step 2 — build the VPK (about a minute)
 
-Your settings and best scores are kept in `ux0:data/ttrvita/settings.txt`
-(`ttrvita_settings.txt` in the PC build). "Best" is your highest-scoring run of
-a song at one difficulty, with that run's streak and accuracy; it is written as
-soon as you beat it. Rebuilding `app_data/` with a different set of songs
-renumbers them, which drops scores for songs that are no longer there.
+```sh
+cmake -S . -B build
+cmake --build build
+```
+
+This produces **`build/ttrvita.vpk`**, about 1 MB. It holds only the program:
+the songs are copied over separately in step 4, because a VPK with them
+inside takes VitaShell well over an hour to unpack.
+
+### Step 3 — install the VPK
+
+Copy `build/ttrvita.vpk` to the Vita (USB or FTP), open it in VitaShell and
+press X. It installs in a few seconds. If you are replacing an earlier build,
+delete the app from the home screen first, as the Vita caches its LiveArea
+page.
+
+### Step 4 — copy the songs (once, a few minutes)
+
+In VitaShell press SELECT for USB mode, then copy the whole `app_data` folder
+onto the memory card at `ux0:data/ttrvita/`, so that you end up with:
+
+```
+ux0:data/ttrvita/app_data/songs.txt
+ux0:data/ttrvita/app_data/audio/   charts/   themes/   gfx/   sfx/
+```
+
+The doubled name is right: `ux0:data` is the Vita's own folder and `app_data`
+is this game's. Launch the game from the home screen.
+
+Updating the program later is just a new VPK; the songs stay where they are.
+
+## Options
+
+```sh
+python3 tools/prep_assets.py game.ipa app_data --limit 20   # only the first 20 songs
+python3 tools/prep_assets.py game.ipa app_data --jobs 4     # how many songs to convert at once
+python3 tools/prep_assets.py game.ipa app_data --no-audio   # charts and themes only, no songs
+cmake -S . -B build -DEMBED_DATA=ON                         # songs inside the VPK (very slow to install)
+```
+
+### Running it on the computer instead
+
+Useful for trying a change without a Vita. Needs SDL2, libpng and libvorbis
+(`brew install sdl2 libpng libvorbis`), and uses the mouse and keyboard
+columns of the controls table above.
+
+```sh
+cmake -S . -B build-pc -DDESKTOP=ON
+cmake --build build-pc
+TTR_DATA=app_data/ ./build-pc/ttrvita
+```
+
+## If something goes wrong
+
+- **`VITASDK is not set`** — run the two `export` lines from above.
+- **VitaShell error `0x8010113D`** — a LiveArea image is not an 8-bit indexed
+  PNG. Everything in `sce_sys/` and `app_data/icon0.png` has to be saved that
+  way (what `pngquant` does); the converter and the files here already are.
+- **The game starts and quits** — it could not find `songs.txt`. Check the
+  path in step 4, including the doubled `app_data`.
+- **Undefined `sce...` symbols when linking** — your SDL2 package wants
+  another stub library; add the matching `Sce..._stub` in `CMakeLists.txt`.
+- **Notes feel early or late against the music** — change `AUDIO_LATENCY` in
+  `src/game.c` (seconds; larger makes notes arrive later).
+- **Shaking needs too much force, or triggers on its own** — change `SHAKE_G`
+  near the top of `src/plat_sdl.c` (lower is more sensitive).
+
+## Settings and scores
+
+Both live in `ux0:data/ttrvita/settings.txt` (`ttrvita_settings.txt` in the PC
+build): the screen layout, and your best run of each song at each difficulty.
+"Best" is your highest-scoring run, with that run's streak and accuracy, and
+it is written as soon as you beat it. Rebuilding `app_data/` with a different
+set of songs renumbers them, which drops scores for songs no longer there.
 
 ## Tests
 
