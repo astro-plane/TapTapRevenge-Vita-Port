@@ -196,6 +196,27 @@ static void draw_bars(void)
 typedef struct { char num[8]; char title[64]; char artist[48]; float length; int levels; char theme[5][28]; } Song;
 static Song *songs;
 static int n_songs;
+
+/* Your best run of each song at each difficulty, kept in the settings file.
+ * "Best" is the highest-scoring run, with that run's streak and accuracy. */
+typedef struct { long score; int streak, hit, judged; } Best;
+static Best *bests;                          /* n_songs * 5, indexed song*5+level */
+
+static Best *best_of(int song, int level)
+{
+    if (!bests || song < 0 || song >= n_songs || level < 0 || level > 4)
+        return NULL;
+    return &bests[song * 5 + level];
+}
+
+static int song_by_num(const char *num)
+{
+    int i;
+    for (i = 0; i < n_songs; i++)
+        if (!strcmp(songs[i].num, num))
+            return i;
+    return -1;
+}
 static const char *level_name[5] = { "Kids", "Easy", "Medium", "Hard", "Extreme" };
 
 static int songs_load(void)
@@ -406,6 +427,27 @@ static void start_song(void)
     scene = SC_PLAY;
 }
 
+static void settings_save(void);
+
+static Best prev_best;                       /* what it was before this run */
+static int new_best;
+
+static void record_run(void)
+{
+    Best *b = best_of(sel_song, sel_level);
+    if (!b)
+        return;
+    prev_best = *b;
+    new_best = score > b->score;
+    if (new_best) {
+        b->score = score;
+        b->streak = best_streak;
+        b->hit = n_hit;
+        b->judged = n_judged;
+        settings_save();                     /* write now: the Vita may be switched off */
+    }
+}
+
 static void end_song(int to_scene)
 {
     plat_music_stop();
@@ -538,6 +580,7 @@ static void play_update(const PlatInput *in, double dt)
     if (song_t > chart_end + 2.5 || (plat_music_done() && song_t > 1.0) || !play_started) {
         for (i = 0; i < n_notes; i++)        /* anything never reached counts as missed */
             if (notes[i].state == N_PENDING) n_judged++;
+        record_run();
         end_song(SC_RESULT);
     }
 }
@@ -737,7 +780,22 @@ static void list_draw(void)
             fill(0, y, LW, ROW_H - 1, 0x2050a0ffu);
         else if (i & 1)
             fill(0, y, LW, ROW_H - 1, 0x181824ffu);
-        text(10, y + 5, 19, 0, LW - 20, 0xffffffffu, s->title);
+        {
+            long top = 0;
+            int l;
+            char buf[32];
+            for (l = 0; l < 5; l++) {        /* the best of any difficulty */
+                const Best *b = best_of(i, l);
+                if (b && b->score > top) top = b->score;
+            }
+            if (top > 0) {
+                snprintf(buf, sizeof buf, "%ld", top);
+                text(LW - 8, y + 14, 15, 2, 100, 0xffd040ffu, buf);
+                text(10, y + 5, 19, 0, LW - 20 - text_width(buf, 15) - 10, 0xffffffffu, s->title);
+            } else {
+                text(10, y + 5, 19, 0, LW - 20, 0xffffffffu, s->title);
+            }
+        }
         text(10, y + 26, 14, 0, LW - 20, 0x90a0c0ffu, s->artist);
     }
     fill(0, 0, LW, LIST_TOP, 0x000000ffu);
@@ -783,9 +841,19 @@ static void level_draw(void)
     for (l = 0; l < 5; l++) {
         if (!(s->levels & (1 << l)))
             continue;
-        fill(60, 190 + row * 50.0f, 200, 44, l == sel_level ? 0x2050a0ffu : 0x282838ffu);
-        text(LW / 2, 200 + row * 50.0f, 22, 1, 0, 0xffffffffu, level_name[l]);
-        row++;
+        {
+            const Best *b = best_of(sel_song, l);
+            char buf[32];
+            fill(60, 190 + row * 50.0f, 200, 44, l == sel_level ? 0x2050a0ffu : 0x282838ffu);
+            if (b && b->score > 0) {
+                text(LW / 2, 194 + row * 50.0f, 20, 1, 0, 0xffffffffu, level_name[l]);
+                snprintf(buf, sizeof buf, "best %ld", b->score);
+                text(LW / 2, 216 + row * 50.0f, 13, 1, 0, 0xffd040ffu, buf);
+            } else {
+                text(LW / 2, 200 + row * 50.0f, 22, 1, 0, 0xffffffffu, level_name[l]);
+            }
+            row++;
+        }
     }
 }
 
@@ -803,42 +871,88 @@ static void result_draw(void)
     text(LW / 2, 230, 17, 1, 0, 0xffffffffu, buf);
     snprintf(buf, sizeof buf, "Best streak: %d", best_streak);
     text(LW / 2, 260, 17, 1, 0, 0xffffffffu, buf);
+    if (new_best && prev_best.score > 0) {
+        snprintf(buf, sizeof buf, "NEW BEST  (was %ld)", prev_best.score);
+        text(LW / 2, 300, 19, 1, 0, 0xffd040ffu, buf);
+    } else if (new_best) {
+        text(LW / 2, 300, 19, 1, 0, 0xffd040ffu, "NEW BEST");
+    } else if (prev_best.score > 0) {
+        int bp = prev_best.judged ? (int)(100.0 * prev_best.hit / prev_best.judged + 0.5) : 0;
+        snprintf(buf, sizeof buf, "Your best: %ld  (%d%%, streak %d)", prev_best.score, bp, prev_best.streak);
+        text(LW / 2, 300, 15, 1, 0, 0x90a0c0ffu, buf);
+    }
     text(LW / 2, 400, 15, 1, 0, 0x90a0c0ffu, "Tap or press X to continue");
 }
 
 /* --------------------------------------------------------- entry points -- */
 
+/* settings.txt: the screen layout, then one "best" line per song+difficulty */
+static void settings_load(void)
+{
+    char line[256], num[8];
+    int level, streak, hit, judged, song;
+    long sc;
+    FILE *fp = fopen(plat_save_file(), "r");
+    if (!fp)
+        return;
+    while (fgets(line, sizeof line, fp)) {
+        if (sscanf(line, "tate %d", &level) == 1) {
+            tate = level != 0;
+        } else if (sscanf(line, "best %7s %d %ld %d %d %d", num, &level, &sc, &streak, &hit, &judged) == 6) {
+            Best *b;
+            song = song_by_num(num);        /* a song no longer present is dropped */
+            b = best_of(song, level);
+            if (b && sc >= b->score) {
+                b->score = sc; b->streak = streak; b->hit = hit; b->judged = judged;
+            }
+        }
+    }
+    fclose(fp);
+}
+
+static void settings_save(void)
+{
+    FILE *fp = fopen(plat_save_file(), "w");
+    int i, l;
+    if (!fp) {
+        fprintf(stderr, "cannot write %s\n", plat_save_file());
+        return;
+    }
+    fprintf(fp, "tate %d\n", tate);
+    for (i = 0; i < n_songs; i++)
+        for (l = 0; l < 5; l++) {
+            const Best *b = best_of(i, l);
+            if (b && b->score > 0)
+                fprintf(fp, "best %s %d %ld %d %d %d\n", songs[i].num, l, b->score, b->streak, b->hit, b->judged);
+        }
+    fclose(fp);
+}
+
 int game_init(int sw, int sh)
 {
-    FILE *fp;
     scr_w = sw;
     scr_h = sh;
-    fp = fopen(plat_save_file(), "r");
-    if (fp) {
-        if (fscanf(fp, "tate %d", &tate) != 1) tate = 0;
-        tate = tate != 0;
-        fclose(fp);
-    }
     view_setup();
     if (tex_load(&tx_bg, "background") || tex_load(&tx_hud, "hud") || tex_load(&tx_font, "font") ||
         font_load() || songs_load())
         return -1;
+    bests = calloc((size_t)n_songs * 5 + 1, sizeof *bests);
+    if (!bests)
+        return -1;
+    settings_load();
+    view_setup();                            /* the layout may have come from the file */
     scene = SC_TITLE;
     return 0;
 }
 
 void game_shutdown(void)
 {
-    FILE *fp = fopen(plat_save_file(), "w");
-    if (fp) {
-        fprintf(fp, "tate %d\n", tate);
-        fclose(fp);
-    }
+    settings_save();
     plat_music_stop();
     theme_free();
     plat_tex_free(tx_bg.t); plat_tex_free(tx_hud.t); plat_tex_free(tx_font.t);
-    free(songs); free(notes);
-    songs = NULL; notes = NULL; n_songs = n_notes = 0;
+    free(songs); free(notes); free(bests);
+    songs = NULL; notes = NULL; bests = NULL; n_songs = n_notes = 0;
 }
 
 int game_frame(double dt, const PlatInput *in)

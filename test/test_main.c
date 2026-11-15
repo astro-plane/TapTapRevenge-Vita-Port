@@ -67,6 +67,7 @@ static void check(const char *label, int ok)
     if (!ok) { printf("  ** FAIL: %s\n", label); fails++; }
 }
 
+static long first_score;
 static int keep_held;      /* leave buttons down after autoplay (to photograph a hold) */
 
 static int load_chart(const char *num, int level)
@@ -168,6 +169,7 @@ int main(int argc, char **argv)
     check("streak equals notes", field("best=") == notes);
     sc = field("score=");
     check("score sensible", sc >= 100L * notes);
+    first_score = sc;
 
     /* song 2: no input at all - everything should be missed */
     press(BTN_CROSS); run(0.1);
@@ -192,6 +194,56 @@ int main(int argc, char **argv)
     in.held = BTN_START; frame(); in.held = 0; frame();
     press(BTN_CIRCLE); run(0.1);
     check("quit to list", field("scene=") == 1);
+
+    /* high scores: the first run is recorded, a worse run does not replace it,
+     * and they survive a restart */
+    {
+        char line[256];
+        long saved = 0;
+        int found = 0;
+        FILE *fp = fopen(plat_save_file(), "r");
+        while (fp && fgets(line, sizeof line, fp)) {
+            char num[8];
+            int lv, st, hi, ju;
+            long sc;
+            if (sscanf(line, "best %7s %d %ld %d %d %d", num, &lv, &sc, &st, &hi, &ju) == 6 && !strcmp(num, "001")) {
+                saved = sc; found = 1;
+            }
+        }
+        if (fp) fclose(fp);
+        check("song 1's run was saved", found && saved == first_score);
+        printf("saved best for song 001: %ld (run scored %ld)\n", saved, first_score);
+
+        /* replay it badly: the stored best must not go down */
+        for (i = 0; i < 400 && field("song=") > 0; i++) press(BTN_UP);
+        check("back at the first song", field("song=") == 0 && field("scene=") == 1);
+        press(BTN_CROSS); press(BTN_CROSS); run(0.05);
+        run(20); snap("10b_second_run");
+        in.held = BTN_START; frame(); in.held = 0; frame();
+        press(BTN_CIRCLE); run(0.2);
+        game_shutdown();
+        if (game_init(w, h) != 0) { printf("re-init failed\n"); return 1; }
+        {
+            long again = 0;
+            int lv2;
+            fp = fopen(plat_save_file(), "r");
+            while (fp && fgets(line, sizeof line, fp)) {
+                char num[8];
+                int st, hi, ju;
+                long sc;
+                if (sscanf(line, "best %7s %d %ld %d %d %d", num, &lv2, &sc, &st, &hi, &ju) == 6 && !strcmp(num, "001"))
+                    again = sc;
+            }
+            if (fp) fclose(fp);
+            check("a worse run did not overwrite it", again == saved);
+            printf("after a worse run and a restart: %ld\n", again);
+        }
+        press(BTN_SELECT);               /* back to landscape for the remaining shots */
+        run(0.3); tap(160, 300); run(0.3); snap("10c_list_with_scores");
+        press(BTN_CROSS); run(0.2); snap("10d_level_with_best");
+        check("best shown for a played song", field("song=") == 0);
+        press(BTN_CIRCLE); run(0.2);
+    }
 
     /* flick the list: it should keep gliding after the finger lifts, then stop */
     {

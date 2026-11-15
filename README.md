@@ -18,10 +18,12 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
 - Three lanes with tap notes, hold notes and shake arrows, timed to the music
   (four lanes in the one theme that has them)
 - Score, streak, 2x/3x/4x multipliers, and an 8x "revenge" mode
+- A saved best for each song and difficulty, shown in the song list, on the
+  difficulty screen and on the results screen
 - Landscape and vertical layouts, pause
 
 Not included: everything online (store, leaderboards, battles, chat), two-player
-mode, weapons/items, the tutorial, album art, and saved high scores. The menus
+mode, weapons/items, the tutorial and album art. The menus
 are this project's own and do not copy the original's look.
 
 ## How faithful it is
@@ -127,6 +129,12 @@ lighter shake registers).
 
 If notes feel early or late against the music on the Vita, change
 `AUDIO_LATENCY` in `src/game.c` (seconds; larger = notes arrive later).
+
+Your settings and best scores are kept in `ux0:data/ttrvita/settings.txt`
+(`ttrvita_settings.txt` in the PC build). "Best" is your highest-scoring run of
+a song at one difficulty, with that run's streak and accuracy; it is written as
+soon as you beat it. Rebuilding `app_data/` with a different set of songs
+renumbers them, which drops scores for songs that are no longer there.
 
 ## Tests
 
