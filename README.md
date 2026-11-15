@@ -124,6 +124,11 @@ python3 tools/prep_assets.py "/path/to/game.ipa" app_data
 The script can be stopped and rerun; finished songs are kept. Audio that does
 not decode as-is is skipped; nothing is decrypted.
 
+If VitaShell refuses the VPK with error `0x8010113D`, a LiveArea image is not
+an 8-bit indexed PNG: everything in `sce_sys/` and `app_data/icon0.png` has to
+be saved that way (what `pngquant` does), which prep_assets.py and the
+placeholders already do.
+
 Shake sensitivity is `SHAKE_G` near the top of `src/plat_sdl.c` (lower = a
 lighter shake registers).
 

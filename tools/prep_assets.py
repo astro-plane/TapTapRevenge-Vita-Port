@@ -195,8 +195,11 @@ def main():
             continue
         if icon is None or im.size[0] > icon.size[0]:
             icon = im
-    if icon is not None:                      # 128x128 is what the Vita wants
-        icon.resize((128, 128), Image.LANCZOS).save(os.path.join(out, 'icon0.png'))
+    if icon is not None:
+        # 128x128, and 8-bit indexed: the Vita refuses to install a package
+        # whose LiveArea images are plain 24-bit PNGs (error 0x8010113D).
+        small = icon.resize((128, 128), Image.LANCZOS)
+        small.convert('P', palette=Image.ADAPTIVE, colors=256).save(os.path.join(out, 'icon0.png'))
         print('  icon from %dx%d artwork' % icon.size)
     if ffmpeg:
         for name, src in {'click': 'TTRRotatingControlClick.wav', 'slide': 'menu_slide.wav'}.items():
