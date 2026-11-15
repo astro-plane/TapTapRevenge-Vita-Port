@@ -287,8 +287,7 @@ class Compiler:
                     lane=lane, shake=shake, window=num(st.get('timeWindow'), 1.7),
                     tap=sh_index.get(st.get('tapShader'), -1), hold=sh_index.get(st.get('tapHoldShader'), -1),
                     hold_a=sh_index.get(st.get('tapHoldActiveShader'), -1),
-                    splash=sh_index.get(st.get('tapSplashShader'),
-                                        sh_index.get('tap_splash_' + ('red', 'green', 'blue', 'blue')[lane], -1)),
+                    splash=splash_for(st.get('tapSplashShader'), lane, sh_index),
                     color=str(st.get('colorChangeSpritePath')),
                     layer=layers.index(path[1]) if len(path) > 1 and path[1] in layers else len(layers),
                     x=sample_curve(st.get('positionXCurve'), sp_[0], ep_[0]),
@@ -360,6 +359,18 @@ class Compiler:
         for ev in events:
             L.append('e %d %d %d %s' % (ev[0], ev[1], ev[2], fmt(ev[3:])))
         return '\n'.join(L) + '\n'
+
+
+def splash_for(named, lane, sh_index):
+    """The hit splash: the column's own shader, else whatever the theme calls
+    its splash (most use tap_splash_red/green/blue, some a single tap_splash)."""
+    for key in (named, 'tap_splash_' + ('red', 'green', 'blue', 'blue')[lane], 'tap_splash', 'tap_splash_generic'):
+        if key in sh_index:
+            return sh_index[key]
+    for name, i in sh_index.items():            # any other shader named like a splash
+        if 'splash' in name.lower():
+            return i
+    return -1
 
 
 def compile_theme(log, theme_dir, search_dirs, out_dir):

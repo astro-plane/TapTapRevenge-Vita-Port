@@ -44,7 +44,10 @@ From the original files, exactly:
 
 Approximated or missing in the themes:
 - the scripts' per-hit handlers are empty in every theme, so there are no
-  script-made hit sparkles to copy; the hit splash is the theme's splash image
+  script-made hit sparkles to copy; the hit splash is the theme's own splash
+  image, named per lane or as one shared `tap_splash`
+- themes that leave the lane colour to the engine's built-in feedback get no
+  colour change on a hit here, only the splash
 - sprites in 3-D layers (one theme's water surface) are left out
 - effects a script starts in its streak, multiplier or miss handler are
   captured for the first 45 seconds after the event, then stop; an effect the
