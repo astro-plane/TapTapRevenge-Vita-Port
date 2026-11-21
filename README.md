@@ -17,8 +17,7 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
   alphabetical sections with an A-Z index; Playlists / Songs / Artists /
   Top Scores tabs; and three looks to switch between (silver, blue-grey
   with see-through section headers, or dark with an orange highlight). Each
-  song's cover art from the game is shown beside it in the silver and dark
-  looks. Picking a song opens a "now playing" style screen: the cover, a
+  song's cover art from the game is shown beside it in every look. Picking a song opens a "now playing" style screen: the cover, a
   slider for the difficulty, and previous / play / next buttons; the results
   screen uses the same layout
 - Play All and Shuffle on each artist's and each playlist's page (and the

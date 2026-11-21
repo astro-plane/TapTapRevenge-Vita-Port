@@ -822,8 +822,8 @@ static void play_draw(void)
 /* The song list looks like a classic phone music library: a title bar,
  * alphabetical sections with a header that sticks to the top, an A-Z index
  * down the right, rows with a cover, and a tab bar.  Three styles:
- * SKIN_SILVER (light grey bars, a cover on each row), SKIN_BLUE (blue-grey
- * bars, see-through section headers, text-only rows) and SKIN_DARK
+ * SKIN_SILVER (light grey bars), SKIN_BLUE (blue-grey bars, see-through
+ * section headers) and SKIN_DARK
  * (near-black, covers, orange highlight and accents).
  *
  * Tabs: Playlists, Songs, Artists, Top Scores, and Shuffle (plays every song
@@ -1753,12 +1753,10 @@ static void draw_row(float y, int e, int lit, float right)
         draw_minus(9, y + 11);
         x0 = 40;
     }
-    if (skin != SKIN_BLUE) {
+    {                                        /* the cover (every look has one) */
         int art = en->kind == E_PLIST ? (pls[en->arg].n ? pls[en->arg].song[0] : -1) : en->arg;
         draw_art(x0, y, art);
         tx = x0 + ROW_H + 8;
-    } else {
-        tx = x0 + 11;
     }
 
     if (en->kind == E_ARTIST || en->kind == E_PLIST) {
