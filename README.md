@@ -1,4 +1,6 @@
-# Tap Tap – PS Vita reimplementation
+# Open Tap Avenged – a Tap Tap reimplementation for the PS Vita
+
+On the Vita it is called **Open Tap Avenged** (title ID `TTRV00001`).
 
 A from-scratch C reimplementation of the rhythm game's single-player mode for
 the PS Vita. It does not run or translate the iOS program. It plays the

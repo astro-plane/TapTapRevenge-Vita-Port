@@ -38,7 +38,7 @@ if(DESKTOP)
 else()
   include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
 
-  set(VITA_APP_NAME "Tap Tap Vita")
+  set(VITA_APP_NAME "Open Tap Avenged")   # the name on the Vita's home screen
   set(VITA_TITLEID  "TTRV00001")
   set(VITA_VERSION  "01.00")
 
@@ -83,7 +83,7 @@ else()
   vita_create_self(ttrvita.self ttrvita)
   vita_create_vpk(ttrvita.vpk ${VITA_TITLEID} ttrvita.self
     VERSION ${VITA_VERSION}
-    NAME ${VITA_APP_NAME}
+    NAME "${VITA_APP_NAME}"
     ${VPK_FILES}
   )
 endif()
