@@ -1371,28 +1371,218 @@ static void list_draw(void)
     draw_tabs();
 }
 
+/* ------------------------------------------- song and results screens -- */
+
+/* Both are laid out like a classic phone's "now playing" screen: a glossy
+ * black bar with the artist, title and length; the cover in the middle over a
+ * dimmed full-width copy of itself (the covers are only 64x64, so the big
+ * copy is a backdrop, not the picture); a row of transport buttons; and a
+ * slider.  On the song screen the slider picks the difficulty and the buttons
+ * are previous song / play / next song.  On the results screen the slider
+ * shows the share of notes hit and the middle button plays the song again. */
+
+#define NP_BAR    44.0f                      /* top bar */
+#define NP_ART    320.0f                     /* cover area, below the bar */
+#define NP_KEYS   (NP_BAR + NP_ART)          /* transport row */
+#define NP_KEYS_H 56.0f
+#define NP_SLIDE  (NP_KEYS + NP_KEYS_H)      /* slider area, to the bottom */
+#define NP_X0     44.0f                      /* slider track ends */
+#define NP_X1     (LW - 44.0f)
+
+static float knob_x = -1;                    /* the difficulty knob glides to its place */
+static int slider_held;
+
+static unsigned accent(void) { return skin == SKIN_DARK ? DARK_ORANGE : 0x2f8cffffu; }
+
+/* a triangle from 1-point strips; dir 1 points right, -1 left */
+static void tri(float x, float y, float w, float h, int dir, unsigned c)
+{
+    int i, n = (int)ceilf(h);
+    for (i = 0; i < n; i++) {
+        float yc = i + 0.5f, tw = w * (1 - fabsf(yc - h / 2) / (h / 2));
+        fill(dir > 0 ? x : x + w - tw, y + i, tw, 1.15f, c);
+    }
+}
+
+static void fmt_num(char *buf, size_t n, long v)  /* 1234567 -> "1,234,567" */
+{
+    char t[24];
+    int len, i, o = 0;
+    snprintf(t, sizeof t, "%ld", v < 0 ? 0 : v);
+    len = (int)strlen(t);
+    for (i = 0; i < len && o + 2 < (int)n; i++) {
+        if (i && (len - i) % 3 == 0) buf[o++] = ',';
+        buf[o++] = t[i];
+    }
+    buf[o] = 0;
+}
+
+/* a song's cover at any size, centred; tint darkens it (0xffffffff = as is) */
+static void draw_cover(int song, float cx, float cy, float size, unsigned tint)
+{
+    int i = atoi(songs[song].num) - 1;
+    if (tx_art.t && i >= 0 && i < art_tiles && art_have[i]) {
+        /* one pixel in from the tile's edge: smoothing would pull in the neighbours */
+        draw(&tx_art, (i % ART_COLS) * ART_TILE + 1, (i / ART_COLS) * ART_TILE + 1, ART_TILE - 2, ART_TILE - 2,
+             cx, cy, size, size, 0, tint, 0);
+    } else {
+        unsigned h = 0, c;
+        const char *p;
+        char b[2] = { '?', 0 };
+        for (p = songs[song].artist; *p; p++) h = h * 31 + (unsigned char)*p;
+        for (p = songs[song].artist; *p; p++)
+            if (isalnum((unsigned char)*p)) { b[0] = (char)toupper((unsigned char)*p); break; }
+        c = mix(0x5d5d72ffu, 0x8e5b4dffu, (float)(h & 7) / 7);
+        c = mix(c, 0x000000ffu, 1 - (float)((tint >> 24) & 255) / 255);
+        shape(cx - size / 2, cy - size / 2, size, size, 0, 0, c, mix(c, 0x000000ffu, 0.3f));
+        text_fit(cx, cy - size * 0.3f, size * 0.6f, 1, 0, mix(0xffffffd8u, 0x000000d8u, 1 - (float)((tint >> 24) & 255) / 255), b, 1);
+    }
+}
+
+static void np_button_back(void)
+{
+    shape(6, 7, 44, 30, 6, 0, 0x000000ffu, 0x000000ffu);
+    shape(7, 8, 42, 28, 5, 0, 0x555555ffu, 0x1c1c1cffu);
+    tri(15, 13, 11, 18, -1, 0xffffffffu);
+    fill(25, 18.5f, 13, 7, 0xffffffffu);
+}
+
+static void np_button_list(void)
+{
+    int k;
+    shape(LW - 50, 7, 44, 30, 6, 0, 0x000000ffu, 0x000000ffu);
+    shape(LW - 49, 8, 42, 28, 5, 0, 0x555555ffu, 0x1c1c1cffu);
+    for (k = 0; k < 3; k++) {
+        fill(LW - 39, 14 + k * 6.5f, 3, 3, 0xffffffffu);
+        fill(LW - 34, 14 + k * 6.5f, 17, 3, 0xffffffffu);
+    }
+}
+
+static void np_bar(const Song *s, const char *third)
+{
+    shape(0, 0, LW, NP_BAR, 0, 0, 0x3c3c3cffu, 0x0e0e0effu);
+    fill(0, 0, LW, 1, 0x5c5c5cffu);
+    fill(0, NP_BAR - 1, LW, 1, 0x000000ffu);
+    np_button_back();
+    np_button_list();
+    text_fit(LW / 2, 2, 12, 1, LW - 124, 0xa8a8a8ffu, s->artist, 0);
+    text_fit(LW / 2, 14, 15, 1, LW - 124, 0xffffffffu, s->title, 1);
+    text_fit(LW / 2, 29, 12, 1, LW - 124, 0xa8a8a8ffu, third, 0);
+}
+
+/* the cover over a dimmed, full-width copy of itself */
+static void np_art(int song, float size, float cy)
+{
+    fill(0, NP_BAR, LW, NP_ART, 0x000000ffu);
+    draw_cover(song, LW / 2, NP_BAR + NP_ART / 2, NP_ART, 0x4a4a4affu);
+    shape(LW / 2 - size / 2 + 3, cy - size / 2 + 5, size, size, 0, 0, 0x00000070u, 0x00000070u);  /* shadow */
+    draw_cover(song, LW / 2, cy, size, 0xffffffffu);
+}
+
+static void np_keys(int middle_on)
+{
+    float w = LW / 3, cy = NP_KEYS + NP_KEYS_H / 2;
+    unsigned ic = 0xffffffffu;
+    shape(0, NP_KEYS, LW, NP_KEYS_H, 0, 0, 0x3e3e3effu, 0x171717ffu);
+    fill(0, NP_KEYS, LW, 1, 0x000000ffu);
+    fill(0, NP_KEYS + 1, LW, 1, 0x5e5e5effu);
+    fill(w, NP_KEYS + 2, 1, NP_KEYS_H - 2, 0x0a0a0affu);
+    fill(w + 1, NP_KEYS + 2, 1, NP_KEYS_H - 2, 0x4a4a4affu);
+    fill(2 * w, NP_KEYS + 2, 1, NP_KEYS_H - 2, 0x0a0a0affu);
+    fill(2 * w + 1, NP_KEYS + 2, 1, NP_KEYS_H - 2, 0x4a4a4affu);
+    tri(w / 2 - 15, cy - 8, 13, 16, -1, ic);           /* previous */
+    tri(w / 2 - 2, cy - 8, 13, 16, -1, ic);
+    tri(LW / 2 - 9, cy - 13, 22, 26, 1, middle_on ? (skin == SKIN_DARK ? DARK_ORANGE : ic) : 0x777777ffu);
+    tri(2.5f * w - 11, cy - 8, 13, 16, 1, ic);         /* next */
+    tri(2.5f * w + 2, cy - 8, 13, 16, 1, ic);
+}
+
+/* the slider: track from NP_X0 to NP_X1, filled up to fx; a knob at fx if knob */
+static void np_slider(float fx, int knob)
+{
+    float ty = NP_SLIDE + 16, th = 9;
+    shape(0, NP_SLIDE, LW, LH - NP_SLIDE, 0, 0, 0x101010ffu, 0x000000ffu);
+    shape(NP_X0 - 1, ty - 1, NP_X1 - NP_X0 + 2, th + 2, (th + 2) / 2, 0, 0x000000ffu, 0x2a2a2affu);
+    shape(NP_X0, ty, NP_X1 - NP_X0, th, th / 2, 0, 0xc8c8c8ffu, 0xf0f0f0ffu);
+    if (fx > NP_X0 + 1)
+        shape(NP_X0, ty, fx - NP_X0, th, th / 2, 0, mix(accent(), 0xffffffffu, 0.35f), mix(accent(), 0x000000ffu, 0.15f));
+    if (knob) {
+        shape(fx - 12, ty + th / 2 - 12, 24, 24, 12, 0, 0x4a4a4affu, 0x2a2a2affu);
+        shape(fx - 11, ty + th / 2 - 11, 22, 22, 11, 0, 0xffffffffu, 0xa6a6a6ffu);
+        shape(fx - 5, ty + th / 2 - 8, 10, 5, 2.5f, 0, 0xffffffc0u, 0xffffff40u);   /* shine */
+    }
+}
+
+/* the difficulty levels a song has, in order, and where each sits on the track */
+static int song_levels(const Song *s, int *lv)
+{
+    int l, n = 0;
+    for (l = 0; l < 5; l++)
+        if (s->levels & (1 << l)) lv[n++] = l;
+    return n;
+}
+
+static float level_x(int k, int n)
+{
+    return n <= 1 ? (NP_X0 + NP_X1) / 2 : NP_X0 + (NP_X1 - NP_X0) * k / (n - 1);
+}
+
+/* the previous or next song in the list's current order */
+static void np_step_song(int dir)
+{
+    int e = sel_ent(), f;
+    if (e < 0) return;
+    for (f = e + dir; f >= 0 && f < n_ents && ents[f].song < 0; f += dir) ;
+    if (f < 0 || f >= n_ents) return;
+    sel_song = ents[f].song;
+    sel_level = first_level(songs[sel_song].levels, sel_level);
+    list_show(f);
+    knob_x = -1;
+    plat_sfx("click");
+}
+
 static void level_update(const PlatInput *in)
 {
-    int l, row = 0, chosen = 0, mask = songs[sel_song].levels, dir = 0;
-    if (in->pressed & BTN_UP) dir = -1;
-    if (in->pressed & BTN_DOWN) dir = 1;
-    if (dir) {
-        for (l = sel_level + dir; l >= 0 && l < 5; l += dir)
-            if (mask & (1 << l)) { sel_level = l; break; }
+    const Song *s = &songs[sel_song];
+    int lv[5], n = song_levels(s, lv), k, cur = 0, dir = 0, go = 0;
+    float w = LW / 3;
+    for (k = 0; k < n; k++)
+        if (lv[k] == sel_level) cur = k;
+    if (in->pressed & (BTN_LEFT | BTN_UP)) dir = -1;
+    if (in->pressed & (BTN_RIGHT | BTN_DOWN)) dir = 1;
+    if (dir && cur + dir >= 0 && cur + dir < n) {
+        sel_level = lv[cur + dir];
+        plat_sfx("click");
     }
-    for (l = 0; l < 5; l++) {
-        if (!(mask & (1 << l)))
-            continue;
-        if (ptr.released && ptr.moved < 8 && ptr.y >= 190 + row * 50 && ptr.y < 234 + row * 50) {
-            sel_level = l;
-            chosen = 1;
+    if (in->pressed & BTN_L) np_step_song(-1);
+    if (in->pressed & BTN_R) np_step_song(1);
+
+    /* the slider: drag the knob, or tap anywhere along the track */
+    if (ptr.pressed)
+        slider_held = ptr.y >= NP_SLIDE && n > 1;
+    if (ptr.down && slider_held) {
+        int best = 0;
+        for (k = 1; k < n; k++)
+            if (fabsf(level_x(k, n) - ptr.x) < fabsf(level_x(best, n) - ptr.x)) best = k;
+        if (lv[best] != sel_level) { sel_level = lv[best]; plat_sfx("click"); }
+    }
+    if (!ptr.down) slider_held = 0;
+
+    if (ptr.released && ptr.moved < 8) {
+        if (ptr.y < NP_BAR && (ptr.x < 60 || ptr.x > LW - 60)) {
+            scene = SC_LIST;
+            return;
         }
-        row++;
+        if (ptr.y >= NP_KEYS && ptr.y < NP_SLIDE) {
+            if (ptr.x < w) np_step_song(-1);
+            else if (ptr.x < 2 * w) go = 1;
+            else np_step_song(1);
+        }
     }
-    if (chosen || (in->pressed & BTN_CROSS)) {
+    if (go || (in->pressed & BTN_CROSS)) {
         plat_sfx("click");
         start_song();
-    } else if ((in->pressed & BTN_CIRCLE) || (ptr.released && ptr.moved < 8 && ptr.y < 60)) {
+    } else if (in->pressed & BTN_CIRCLE) {
         scene = SC_LIST;
     }
 }
@@ -1400,56 +1590,96 @@ static void level_update(const PlatInput *in)
 static void level_draw(void)
 {
     const Song *s = &songs[sel_song];
-    int l, row = 0;
-    fill(0, 0, LW, LH, 0x101018ffu);
-    text(12, 14, 16, 0, 0, 0x90a0c0ffu, "< back");
-    text(LW / 2, 80, 24, 1, LW - 16, 0xffffffffu, s->title);
-    text(LW / 2, 112, 16, 1, LW - 16, 0x90a0c0ffu, s->artist);
-    text(LW / 2, 156, 15, 1, 0, 0xffd040ffu, "Choose a difficulty");
-    for (l = 0; l < 5; l++) {
-        if (!(s->levels & (1 << l)))
-            continue;
-        {
-            const Best *b = best_of(sel_song, l);
-            char buf[32];
-            fill(60, 190 + row * 50.0f, 200, 44, l == sel_level ? 0x2050a0ffu : 0x282838ffu);
-            if (b && b->score > 0) {
-                text(LW / 2, 194 + row * 50.0f, 20, 1, 0, 0xffffffffu, level_name[l]);
-                snprintf(buf, sizeof buf, "best %ld", b->score);
-                text(LW / 2, 216 + row * 50.0f, 13, 1, 0, 0xffd040ffu, buf);
-            } else {
-                text(LW / 2, 200 + row * 50.0f, 22, 1, 0, 0xffffffffu, level_name[l]);
-            }
-            row++;
+    const Best *b = best_of(sel_song, sel_level);
+    int lv[5], n = song_levels(s, lv), k, cur = 0;
+    char len[16], buf[64], num[24];
+    float target, art_cy = NP_BAR + 112;
+    for (k = 0; k < n; k++)
+        if (lv[k] == sel_level) cur = k;
+    snprintf(len, sizeof len, "%d:%02d", (int)s->length / 60, (int)s->length % 60);
+    fill(0, 0, LW, LH, 0x000000ffu);
+    np_art(sel_song, 176, art_cy);
+
+    /* the "lyrics": the chosen difficulty and your best at it */
+    text_sh(LW / 2, NP_BAR + 214, 22, 1, LW - 20, 0xffffffffu, 0x000000c0u, 1, level_name[sel_level]);
+    if (b && b->score > 0) {
+        int pct = b->judged ? (int)(100.0 * b->hit / b->judged + 0.5) : 0;
+        fmt_num(num, sizeof num, b->score);
+        snprintf(buf, sizeof buf, "Best  %s", num);
+        text_sh(LW / 2, NP_BAR + 246, 17, 1, LW - 20, 0xffffffffu, 0x000000c0u, 1, buf);
+        snprintf(buf, sizeof buf, "%d%% of notes  -  streak %d", pct, b->streak);
+        text_fit(LW / 2, NP_BAR + 272, 14, 1, LW - 20, 0xb4b4b4ffu, buf, 0);
+    } else {
+        text_fit(LW / 2, NP_BAR + 250, 15, 1, LW - 20, 0xb4b4b4ffu, "Not played yet", 0);
+    }
+    np_bar(s, len);
+    np_keys(1);
+
+    /* difficulty slider, the knob gliding to the chosen level */
+    target = level_x(cur, n);
+    if (knob_x < 0 || slider_held) knob_x = slider_held ? fminf(fmaxf(ptr.x, NP_X0), NP_X1) : target;
+    else knob_x += (target - knob_x) * 0.3f;
+    np_slider(knob_x, 1);
+    for (k = 0; k < n; k++) {
+        int on = k == cur;
+        text_fit(level_x(k, n), NP_SLIDE + 34, 11, 1, 0, on ? 0xffffffffu : 0x8a8a8affu, level_name[lv[k]], on);
+    }
+}
+
+static void result_update(const PlatInput *in)
+{
+    float w = LW / 3;
+    if (ptr.released && ptr.moved < 8) {
+        if (ptr.y < NP_BAR && (ptr.x < 60 || ptr.x > LW - 60)) { scene = SC_LIST; return; }
+        if (ptr.y >= NP_KEYS && ptr.y < NP_SLIDE) {
+            if (ptr.x < w) { np_step_song(-1); scene = SC_LEVEL; }
+            else if (ptr.x < 2 * w) { plat_sfx("click"); start_song(); }
+            else { np_step_song(1); scene = SC_LEVEL; }
+            return;
         }
     }
+    if (in->pressed & BTN_TRIANGLE) { plat_sfx("click"); start_song(); }
+    else if (in->pressed & (BTN_CROSS | BTN_CIRCLE)) scene = SC_LIST;
 }
 
 static void result_draw(void)
 {
     const Song *s = &songs[sel_song];
-    char buf[64];
+    char buf[64], num[24];
     int pct = n_judged ? (int)(100.0 * n_hit / n_judged + 0.5) : 0;
-    fill(0, 0, LW, LH, 0x101018ffu);
-    text(LW / 2, 50, 22, 1, LW - 16, 0xffffffffu, s->title);
-    text(LW / 2, 80, 15, 1, LW - 16, 0x90a0c0ffu, level_name[sel_level]);
-    snprintf(buf, sizeof buf, "%ld", score);
-    text(LW / 2, 140, 44, 1, 0, 0xffd040ffu, buf);
-    snprintf(buf, sizeof buf, "Notes hit: %d of %d (%d%%)", n_hit, n_judged, pct);
-    text(LW / 2, 230, 17, 1, 0, 0xffffffffu, buf);
-    snprintf(buf, sizeof buf, "Best streak: %d", best_streak);
-    text(LW / 2, 260, 17, 1, 0, 0xffffffffu, buf);
+    float y = NP_BAR + 158;
+    fill(0, 0, LW, LH, 0x000000ffu);
+    np_art(sel_song, 112, NP_BAR + 72);
+
+    fmt_num(num, sizeof num, score);
+    text_sh(LW / 2, y, 40, 1, LW - 20, new_best ? (skin == SKIN_DARK ? DARK_ORANGE : 0xffd040ffu) : 0xffffffffu,
+            0x000000c0u, 2, num);
     if (new_best && prev_best.score > 0) {
-        snprintf(buf, sizeof buf, "NEW BEST  (was %ld)", prev_best.score);
-        text(LW / 2, 300, 19, 1, 0, 0xffd040ffu, buf);
+        fmt_num(num, sizeof num, prev_best.score);
+        snprintf(buf, sizeof buf, "New best!  (was %s)", num);
     } else if (new_best) {
-        text(LW / 2, 300, 19, 1, 0, 0xffd040ffu, "NEW BEST");
+        snprintf(buf, sizeof buf, "New best!");
     } else if (prev_best.score > 0) {
-        int bp = prev_best.judged ? (int)(100.0 * prev_best.hit / prev_best.judged + 0.5) : 0;
-        snprintf(buf, sizeof buf, "Your best: %ld  (%d%%, streak %d)", prev_best.score, bp, prev_best.streak);
-        text(LW / 2, 300, 15, 1, 0, 0x90a0c0ffu, buf);
+        fmt_num(num, sizeof num, prev_best.score);
+        snprintf(buf, sizeof buf, "Your best: %s", num);
+    } else {
+        buf[0] = 0;
     }
-    text(LW / 2, 400, 15, 1, 0, 0x90a0c0ffu, "Tap or press X to continue");
+    text_sh(LW / 2, y + 48, 16, 1, LW - 20, 0xffffffffu, 0x000000c0u, 1, buf);
+    snprintf(buf, sizeof buf, "Notes hit: %d of %d", n_hit, n_judged);
+    text_fit(LW / 2, y + 80, 15, 1, LW - 20, 0xc8c8c8ffu, buf, 0);
+    snprintf(buf, sizeof buf, "Best streak: %d", best_streak);
+    text_fit(LW / 2, y + 104, 15, 1, LW - 20, 0xc8c8c8ffu, buf, 0);
+    np_bar(s, level_name[sel_level]);
+    np_keys(1);
+
+    /* the share of notes hit, as a filled track */
+    np_slider(NP_X0 + (NP_X1 - NP_X0) * pct / 100.0f, 0);
+    snprintf(buf, sizeof buf, "%d", n_hit);
+    text(NP_X0 - 6, NP_SLIDE + 14, 12, 2, 0, 0xa8a8a8ffu, buf);
+    snprintf(buf, sizeof buf, "%d%%", pct);
+    text(NP_X1 + 6, NP_SLIDE + 14, 12, 0, 0, 0xa8a8a8ffu, buf);
+    text_fit(LW / 2, NP_SLIDE + 34, 11, 1, 0, 0x8a8a8affu, "X: song list    Triangle: play again", 0);
 }
 
 /* --------------------------------------------------------- entry points -- */
@@ -1573,10 +1803,7 @@ int game_frame(double dt, const PlatInput *in)
     case SC_LIST:   list_update(in, dt); break;
     case SC_LEVEL:  level_update(in); break;
     case SC_PLAY:   play_update(in, dt); break;
-    case SC_RESULT:
-        if (ptr.released || (in->pressed & (BTN_CROSS | BTN_CIRCLE)))
-            scene = SC_LIST;
-        break;
+    case SC_RESULT: result_update(in); break;
     }
 
     plat_begin();

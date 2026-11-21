@@ -16,7 +16,9 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
   a Shuffle button, and three looks to switch between (silver, blue-grey
   with see-through section headers, or dark with an orange highlight). Each
   song's cover art from the game is shown beside it in the silver and dark
-  looks. Difficulty select, results screen
+  looks. Picking a song opens a "now playing" style screen: the cover, a
+  slider for the difficulty, and previous / play / next buttons; the results
+  screen uses the same layout
 - Each song's own theme (119 of them): background, lane shapes, note art,
   note speed, moving/pulsing scenery, and the colour and light changes on
   streaks, multipliers and misses
@@ -89,6 +91,9 @@ This project's own choices (constants at the top of `src/game.c`):
 | Square, or the Shuffle tab | | pick a song at random |
 | START, or the Style button | | switch between the three list looks (saved) |
 | Cross / Circle | Enter / Esc | choose / back |
+| Left / Right (or Up / Down), or the slider | | song screen: pick the difficulty |
+| L / R, or the arrow buttons | | song screen: previous / next song |
+| Triangle, or the middle button | | results: play the song again |
 
 In the vertical layout, hold the Vita turned a quarter turn clockwise.
 
