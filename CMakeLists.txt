@@ -50,8 +50,9 @@ else()
                     "ux0:data/ttrvita/app_data/.")
   endif()
 
-  # Home screen icon: this project's own (sce_sys/icon0.png: three white dots
-  # on striped orange), 128x128 and 8-bit indexed as LiveArea requires.
+  # Home screen icon: this project's own (sce_sys/icon0.png: the three
+  # tappers, red, green and blue, over a neon grid), 128x128 and 8-bit
+  # indexed as LiveArea requires.
   set(VITA_ICON "${CMAKE_SOURCE_DIR}/sce_sys/icon0.png")
 
   target_include_directories(ttrvita PRIVATE "$ENV{VITASDK}/arm-vita-eabi/include/SDL2")

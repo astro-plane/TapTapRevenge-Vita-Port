@@ -327,9 +327,9 @@ tools/theme_dump.lua   runs one theme script and logs what it sets up
 tools/theme_compile.py turns that log into app_data/themes/<name>/theme.txt
 tools/pvrtc.py         decoder for PVRTC-compressed textures
 test/            headless renderer and scripted play-through
-sce_sys/         LiveArea files: home screen icon (three white dots on striped
-                 orange), wallpaper, start-button image and template.xml. All
-                 of these must be 8-bit indexed PNGs
+sce_sys/         LiveArea files: home screen icon (the three tappers over a
+                 neon grid), wallpaper, start-button image and template.xml.
+                 All of these must be 8-bit indexed PNGs
 ```
 
 ## Note
