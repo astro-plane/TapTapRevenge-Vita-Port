@@ -88,6 +88,15 @@ static void s2l(float sx, float sy, float *lx, float *ly)
 typedef struct { PlatTex *t; int w, h; } Tex;
 static Tex tx_bg, tx_hud, tx_font;
 
+/* Song covers, packed by tools/prep_assets.py into gfx/art.png: song number N
+ * is tile N-1, ART_COLS tiles of ART_TILE pixels per row.  Optional: data
+ * converted before covers were added has none, and gets lettered tiles. */
+#define ART_TILE 64
+#define ART_COLS 32
+static Tex tx_art;
+static unsigned char *art_have;              /* per tile: is there a cover in it? */
+static int art_tiles;
+
 typedef struct { int x, y, adv; } Glyph;
 static Glyph glyphs[128];
 static int font_h = 24;
@@ -105,6 +114,34 @@ static int tex_load(Tex *t, const char *name)
     t->t = plat_tex_create(px, t->w, t->h);
     free(px);
     return t->t ? 0 : -1;
+}
+
+static void art_load(void)
+{
+    char path[512];
+    unsigned char *px;
+    int w, h, i;
+    snprintf(path, sizeof path, "%sgfx/art.png", plat_data_dir());
+    px = png_load_rgba(path, &w, &h);
+    if (!px)
+        return;                              /* no covers: lettered tiles */
+    art_tiles = (w / ART_TILE) * (h / ART_TILE);
+    art_have = calloc((size_t)art_tiles + 1, 1);
+    if (art_have) {
+        for (i = 0; i < art_tiles; i++) {    /* an empty tile is see-through */
+            int cx = (i % ART_COLS) * ART_TILE + ART_TILE / 2, cy = (i / ART_COLS) * ART_TILE + ART_TILE / 2;
+            art_have[i] = cx < w && cy < h && px[((size_t)cy * w + cx) * 4 + 3] > 0;
+        }
+        tx_art.t = plat_tex_create(px, w, h);
+        tx_art.w = w;
+        tx_art.h = h;
+    }
+    free(px);
+    if (!tx_art.t) {
+        free(art_have);
+        art_have = NULL;
+        art_tiles = 0;
+    }
 }
 
 static int font_load(void)
@@ -1173,10 +1210,17 @@ static void draw_art(float x, float y, int song)
     };
     const char *p;
     unsigned h = 0, c;
+    int i;
     char b[2] = { '?', 0 };
     for (p = songs[song].artist; *p; p++) h = h * 31 + (unsigned char)*p;
     for (p = songs[song].artist; *p; p++)
         if (isalnum((unsigned char)*p)) { b[0] = (char)toupper((unsigned char)*p); break; }
+    i = atoi(songs[song].num) - 1;
+    if (tx_art.t && i >= 0 && i < art_tiles && art_have[i]) {
+        draw(&tx_art, (i % ART_COLS) * ART_TILE, (i / ART_COLS) * ART_TILE, ART_TILE, ART_TILE,
+             x + ROW_H / 2, y + (ROW_H - 1) / 2, ROW_H, ROW_H - 1, 0, 0xffffffffu, 0);
+        return;
+    }
     c = pal[h & 7];
     shape(x, y, ROW_H, ROW_H - 1, 0, 0, c, mix(c, 0x000000ffu, 0.3f));
     text_fit(x + ROW_H / 2, y + 8, 26, 1, 0, 0xffffffd8u, b, 1);
@@ -1462,6 +1506,7 @@ int game_init(int sw, int sh)
     if (tex_load(&tx_bg, "background") || tex_load(&tx_hud, "hud") || tex_load(&tx_font, "font") ||
         font_load() || songs_load())
         return -1;
+    art_load();
     bests = calloc((size_t)n_songs * 5 + 1, sizeof *bests);
     if (!bests)
         return -1;
@@ -1480,7 +1525,11 @@ void game_shutdown(void)
     settings_save();
     plat_music_stop();
     theme_free();
-    plat_tex_free(tx_bg.t); plat_tex_free(tx_hud.t); plat_tex_free(tx_font.t);
+    plat_tex_free(tx_bg.t); plat_tex_free(tx_hud.t); plat_tex_free(tx_font.t); plat_tex_free(tx_art.t);
+    tx_art.t = NULL;
+    free(art_have);
+    art_have = NULL;
+    art_tiles = 0;
     free(songs); free(notes); free(bests); free(ents); free(ord);
     songs = NULL; notes = NULL; bests = NULL; ents = NULL; ord = NULL;
     n_songs = n_notes = n_ents = n_rows = 0;

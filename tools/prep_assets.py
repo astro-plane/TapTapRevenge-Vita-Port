@@ -12,7 +12,7 @@ Writes
     out/themes/<name>/   every theme the songs use: images plus theme.txt, made
                          by running the game's own theme scripts (needs a Lua
                          5.3/5.4 interpreter: lua, lua5.4 or texlua)
-    out/gfx/*.png        menu background, HUD sheet and a generated font
+    out/gfx/*.png        menu background, HUD sheet, a generated font and the song covers
     out/icon0.png        the game's own icon, for the Vita's home screen
     out/sfx/*.wav        two menu sounds
 
@@ -106,6 +106,34 @@ def make_font(path_png, path_txt, size=22):
     im.save(path_png)
     with open(path_txt, 'w') as f:
         f.write('font %d %d\n' % (len(rows), cell_h) + '\n'.join(rows) + '\n')
+
+
+ART_TILE, ART_COLS = 64, 32
+
+
+def build_art(z, tracks, out):
+    """Every song's cover (artwork.png in its .track folder, a 64x64 TIFF despite
+    the name) packed into gfx/art.png: song N at tile N-1, ART_COLS tiles per row.
+    A song without one leaves its tile see-through, and the game draws a lettered
+    tile there instead."""
+    if not tracks:
+        return
+    rows = (max(t['num'] for t in tracks) + ART_COLS - 1) // ART_COLS
+    sheet = Image.new('RGBA', (ART_COLS * ART_TILE, rows * ART_TILE), (0, 0, 0, 0))
+    found = 0
+    for t in tracks:
+        try:
+            im = Image.open(io.BytesIO(z.read(t['dir'] + 'artwork.png'))).convert('RGB')
+        except Exception:
+            continue
+        if im.size != (ART_TILE, ART_TILE):     # a few are not square: fit, black bars, no stretching
+            from PIL import ImageOps
+            im = ImageOps.pad(im, (ART_TILE, ART_TILE), Image.LANCZOS, color=(0, 0, 0))
+        i = t['num'] - 1
+        sheet.paste(im, ((i % ART_COLS) * ART_TILE, (i // ART_COLS) * ART_TILE))
+        found += 1
+    sheet.save(os.path.join(out, 'gfx', 'art.png'))
+    print('%d of %d song covers' % (found, len(tracks))); sys.stdout.flush()
 
 
 def build_themes(z, app, names, wanted, out, lua):
@@ -235,6 +263,8 @@ def main():
     for i, t in enumerate(tracks):
         t['num'] = i + 1
     print('%d tracks found' % len(tracks)); sys.stdout.flush()
+
+    build_art(z, tracks, out)
 
     import threading
     zlock = threading.Lock()

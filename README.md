@@ -14,7 +14,9 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
 - Song list (343 tracks) in the style of a classic phone music library:
   alphabetical sections with an A-Z index, Songs / Artists / Top Scores tabs,
   a Shuffle button, and three looks to switch between (silver, blue-grey
-  with see-through section headers, or dark with an orange highlight). Difficulty select, results screen
+  with see-through section headers, or dark with an orange highlight). Each
+  song's cover art from the game is shown beside it in the silver and dark
+  looks. Difficulty select, results screen
 - Each song's own theme (119 of them): background, lane shapes, note art,
   note speed, moving/pulsing scenery, and the colour and light changes on
   streaks, multipliers and misses
@@ -26,7 +28,7 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
 - Landscape and vertical layouts, pause
 
 Not included: everything online (store, leaderboards, battles, chat), two-player
-mode, weapons/items, the tutorial and album art. The menus
+mode, weapons/items and the tutorial. The menus
 are this project's own and do not copy the original's look.
 
 ## How faithful it is
@@ -175,7 +177,7 @@ app_data/songs.txt     the song list
 app_data/charts/       343 note charts
 app_data/audio/        343 songs as .ogg
 app_data/themes/       120 themes
-app_data/gfx/  sfx/    menu graphics, font and two sounds
+app_data/gfx/  sfx/    menu graphics, song covers (art.png), font and two sounds
 app_data/icon0.png     the home screen icon, taken from the game
 ```
 
@@ -214,6 +216,12 @@ The doubled name is right: `ux0:data` is the Vita's own folder and `app_data`
 is this game's. Launch the game from the home screen.
 
 Updating the program later is just a new VPK; the songs stay where they are.
+
+**Song covers in an older `app_data/`.** Covers were added after the first
+version of the converter. If your song list shows lettered squares instead of
+cover art, run the converter again on the same folder (songs already converted
+are kept, so it is quick) and copy the new `app_data/gfx/art.png` to
+`ux0:data/ttrvita/app_data/gfx/` on the Vita.
 
 ## Options
 
