@@ -61,6 +61,21 @@ static void view_setup(void)
     }
 }
 
+/* The menus fill the whole screen: 480 points tall in the landscape layout,
+ * the width following the screen; 320 points wide in the vertical layout,
+ * the height following it.  A song switches to its theme's own size. */
+static void menu_size(void)
+{
+    if (tate) {
+        cur_w = 320.0f;
+        cur_h = 320.0f * (float)scr_w / (float)scr_h;
+    } else {
+        cur_h = 480.0f;
+        cur_w = 480.0f * (float)scr_w / (float)scr_h;
+    }
+    view_setup();
+}
+
 void game_l2s(float lx, float ly, float *sx, float *sy)
 {
     if (!vt) {
@@ -86,7 +101,7 @@ static void s2l(float sx, float sy, float *lx, float *ly)
 /* ------------------------------------------------------------ graphics -- */
 
 typedef struct { PlatTex *t; int w, h; } Tex;
-static Tex tx_bg, tx_hud, tx_font;
+static Tex tx_hud, tx_font;
 
 /* Song covers, packed by tools/prep_assets.py into gfx/art.png: song number N
  * is tile N-1, ART_COLS tiles of ART_TILE pixels per row.  Optional: data
@@ -512,9 +527,7 @@ static void end_song(int to_scene)
 {
     plat_music_stop();
     theme_free();
-    cur_w = 320.0f;                          /* menus are always portrait */
-    cur_h = 480.0f;
-    view_setup();
+    menu_size();                             /* back to the menus' size */
     paused = 0;
     scene = to_scene;
     if (to_scene == SC_RESULT)
@@ -1138,10 +1151,8 @@ static void list_open_page(void)
 
 static void list_back(void)
 {
-    if (!list_page) {
-        scene = SC_TITLE;
-        return;
-    }
+    if (!list_page)
+        return;                              /* the top: nothing above it */
     list_page = 0;
     edit_mode = 0;
     cur_kind = top_kind;
@@ -1551,7 +1562,7 @@ static void nav_button(float x, float w, float arrow, const char *label)
 
 static void draw_nav(void)
 {
-    const char *title = view_title[list_view], *back = list_page ? view_title[list_view] : "Back";
+    const char *title = view_title[list_view], *back = view_title[list_view];
     const char *right = on_playlist_page() ? (edit_mode ? "Done" : "Edit") : "Style";
     float bw;
     if (list_page && list_view == V_ARTISTS && page_song >= 0) title = songs[page_song].artist;
@@ -1575,8 +1586,8 @@ static void draw_nav(void)
     bw = text_width(back, 14) + (skin != SKIN_BLUE ? 30 : 22);
     if (bw < 60) bw = 60;
     if (bw > 84) bw = 84;
-    if (skin != SKIN_BLUE || list_page) nav_button(6, bw, 11, back);
-    else nav_button(6, bw, 0, back);
+    if (list_page)                           /* only a page has somewhere to go back to */
+        nav_button(6, bw, 11, back);
     nav_button(LW - 70, 64, skin == SKIN_BLUE && !on_playlist_page() ? -11 : 0, right);
 }
 
@@ -1875,9 +1886,10 @@ static void list_draw(void)
  * shows the share of notes hit and the middle button plays the song again. */
 
 #define NP_BAR    44.0f                      /* top bar */
-#define NP_ART    320.0f                     /* cover area, below the bar */
-#define NP_KEYS   (NP_BAR + NP_ART)          /* transport row */
 #define NP_KEYS_H 56.0f
+#define NP_KEYS   (LH - NP_KEYS_H - 60.0f)   /* transport row: the bottom 116 points are its and the slider's */
+#define NP_ART    (NP_KEYS - NP_BAR)         /* cover area: the rest, below the bar */
+#define NP_OY     ((NP_ART - 320.0f) / 2)    /* the cover and text are laid out for 320 points of it */
 #define NP_SLIDE  (NP_KEYS + NP_KEYS_H)      /* slider area, to the bottom */
 #define NP_X0     44.0f                      /* slider track ends */
 #define NP_X1     (LW - 44.0f)
@@ -2094,7 +2106,7 @@ static void level_draw(void)
     const Best *b = best_of(sel_song, sel_level);
     int lv[5], n = song_levels(s, lv), k, cur = 0;
     char len[16], buf[64], num[24];
-    float target, art_cy = NP_BAR + 112;
+    float target, art_cy = NP_BAR + NP_OY + 112;
     for (k = 0; k < n; k++)
         if (lv[k] == sel_level) cur = k;
     snprintf(len, sizeof len, "%d:%02d", (int)s->length / 60, (int)s->length % 60);
@@ -2102,16 +2114,16 @@ static void level_draw(void)
     np_art(sel_song, 176, art_cy);
 
     /* the "lyrics": the chosen difficulty and your best at it */
-    text_sh(LW / 2, NP_BAR + 214, 22, 1, LW - 20, 0xffffffffu, 0x000000c0u, 1, level_name[sel_level]);
+    text_sh(LW / 2, NP_BAR + NP_OY + 214, 22, 1, LW - 20, 0xffffffffu, 0x000000c0u, 1, level_name[sel_level]);
     if (b && b->score > 0) {
         int pct = b->judged ? (int)(100.0 * b->hit / b->judged + 0.5) : 0;
         fmt_num(num, sizeof num, b->score);
         snprintf(buf, sizeof buf, "Best  %s", num);
-        text_sh(LW / 2, NP_BAR + 246, 17, 1, LW - 20, 0xffffffffu, 0x000000c0u, 1, buf);
+        text_sh(LW / 2, NP_BAR + NP_OY + 246, 17, 1, LW - 20, 0xffffffffu, 0x000000c0u, 1, buf);
         snprintf(buf, sizeof buf, "%d%% of notes  -  streak %d", pct, b->streak);
-        text_fit(LW / 2, NP_BAR + 272, 14, 1, LW - 20, 0xb4b4b4ffu, buf, 0);
+        text_fit(LW / 2, NP_BAR + NP_OY + 272, 14, 1, LW - 20, 0xb4b4b4ffu, buf, 0);
     } else {
-        text_fit(LW / 2, NP_BAR + 250, 15, 1, LW - 20, 0xb4b4b4ffu, "Not played yet", 0);
+        text_fit(LW / 2, NP_BAR + NP_OY + 250, 15, 1, LW - 20, 0xb4b4b4ffu, "Not played yet", 0);
     }
     np_bar(s, len);
     np_keys(1);
@@ -2166,9 +2178,9 @@ static void result_draw(void)
     const Song *s = &songs[sel_song];
     char buf[128], num[24];
     int pct = n_judged ? (int)(100.0 * n_hit / n_judged + 0.5) : 0;
-    float y = NP_BAR + 158;
+    float y = NP_BAR + NP_OY + 158;
     fill(0, 0, LW, LH, 0x000000ffu);
-    np_art(sel_song, 112, NP_BAR + 72);
+    np_art(sel_song, 112, NP_BAR + NP_OY + 72);
 
     fmt_num(num, sizeof num, score);
     text_sh(LW / 2, y, 40, 1, LW - 20, new_best ? (skin == SKIN_DARK ? DARK_ORANGE : 0xffd040ffu) : 0xffffffffu,
@@ -2290,7 +2302,7 @@ int game_init(int sw, int sh)
     scr_w = sw;
     scr_h = sh;
     view_setup();
-    if (tex_load(&tx_bg, "background") || tex_load(&tx_hud, "hud") || tex_load(&tx_font, "font") ||
+    if (tex_load(&tx_hud, "hud") || tex_load(&tx_font, "font") ||
         font_load() || songs_load())
         return -1;
     art_load();
@@ -2299,7 +2311,7 @@ int game_init(int sw, int sh)
         return -1;
     n_pls = 0;
     settings_load();
-    view_setup();                            /* the layout may have come from the file */
+    menu_size();                             /* the layout may have come from the file */
     sel_song = -1;                           /* the list starts on its first row */
     cur_kind = E_SONG;
     cur_arg = -1;
@@ -2309,7 +2321,7 @@ int game_init(int sw, int sh)
     sheet.kind = SH_NONE;
     list_scroll = 0;
     list_dirty = 1;
-    scene = SC_TITLE;
+    scene = SC_LIST;                         /* straight to the song list: no title screen */
     return 0;
 }
 
@@ -2318,7 +2330,7 @@ void game_shutdown(void)
     settings_save();
     plat_music_stop();
     theme_free();
-    plat_tex_free(tx_bg.t); plat_tex_free(tx_hud.t); plat_tex_free(tx_font.t); plat_tex_free(tx_art.t);
+    plat_tex_free(tx_hud.t); plat_tex_free(tx_font.t); plat_tex_free(tx_art.t);
     tx_art.t = NULL;
     free(art_have);
     art_have = NULL;
@@ -2332,7 +2344,6 @@ void game_shutdown(void)
 int game_frame(double dt, const PlatInput *in)
 {
     int was = ptr.down;
-    char buf[64];
 
     if (dt > 0.1) dt = 0.1;
     if (dt < 0) dt = 0;
@@ -2340,7 +2351,8 @@ int game_frame(double dt, const PlatInput *in)
 
     if ((in->pressed & BTN_SELECT) && !(scene == SC_PLAY && paused)) {
         tate = !tate;
-        view_setup();
+        if (scene == SC_PLAY) view_setup();
+        else menu_size();
     }
     ptr.down = in->n > 0;
     ptr.pressed = ptr.down && !was;
@@ -2355,14 +2367,6 @@ int game_frame(double dt, const PlatInput *in)
     }
 
     switch (scene) {
-    case SC_TITLE:
-        if (ptr.released || (in->pressed & BTN_CROSS)) {
-            plat_sfx("slide");
-            scene = SC_LIST;
-        } else if (in->pressed & BTN_START) {
-            return 0;
-        }
-        break;
     case SC_LIST:   list_update(in, dt); break;
     case SC_LEVEL:  level_update(in); break;
     case SC_PLAY:   play_update(in, dt); break;
@@ -2371,16 +2375,6 @@ int game_frame(double dt, const PlatInput *in)
 
     plat_begin();
     switch (scene) {
-    case SC_TITLE:
-        draw(&tx_bg, 0, 0, tx_bg.w, tx_bg.h, LW / 2, LH / 2, 512, 512, 0, 0xffffffffu, 0);
-        fill(0, 120, LW, 130, 0x000000a0u);
-        text(LW / 2, 135, 34, 1, 0, 0xffffffffu, "TAP TAP");
-        text(LW / 2, 175, 24, 1, 0, 0xffd040ffu, "PS Vita reimplementation");
-        snprintf(buf, sizeof buf, "%d songs", n_songs);
-        text(LW / 2, 212, 16, 1, 0, 0xc0c0c0ffu, buf);
-        if (fmod(now_t, 1.2) < 0.8)
-            text(LW / 2, 300, 18, 1, 0, 0xffffffffu, "Tap the screen or press X");
-        break;
     case SC_LIST:   list_draw(); break;
     case SC_LEVEL:  level_draw(); break;
     case SC_PLAY:   play_draw(); break;

@@ -144,7 +144,7 @@ int main(int argc, char **argv)
     if (argc > 2) {                       /* quick look at one song: test <outdir> <song index> */
         char num[8], name[32];
         int song = atoi(argv[2]);
-        run(0.3); tap(160, 300); run(0.2);
+        run(0.5);
         /* the list is alphabetical: walk it to the song with that number */
         for (i = 0; i < 2000 && field("num=") != song + 1; i++) press(BTN_DOWN);
         press(BTN_CROSS); press(BTN_CROSS); run(0.05);
@@ -157,8 +157,11 @@ int main(int argc, char **argv)
         game_shutdown();
         return 0;
     }
-    run(0.3); snap("01_title"); say("title");
-    tap(160, 300); run(0.2); snap("02_list"); say("list");
+    run(0.5); snap("02_list"); say("list");
+    check("starts on the song list", field("scene=") == 1);
+    tap(100, 88); run(0.2);                           /* the first row, under the "A" header */
+    check("tapping a row opens its song screen", field("scene=") == 2 && field("row=") == 0);
+    press(BTN_CIRCLE); run(0.2);
     check("on song list", field("scene=") == 1);
     for (i = 0; i < 3; i++) press(BTN_DOWN);
     check("cursor moved", field("row=") == 3);
@@ -251,7 +254,7 @@ int main(int argc, char **argv)
             printf("after a worse run and a restart: %ld\n", again);
         }
         press(BTN_SELECT);               /* back to landscape for the remaining shots */
-        run(0.3); tap(160, 300); run(0.3); snap("10c_list_with_scores");
+        run(0.6); snap("10c_list_with_scores");
         press(BTN_CROSS); run(0.2); snap("10d_level_with_best");
         check("best shown for a played song", !strcmp(cur_num(), first_num));
         press(BTN_CIRCLE); run(0.2);
@@ -334,7 +337,7 @@ int main(int argc, char **argv)
     check("playlists kept after a restart", field("pls=") == 2 && field("pl0=") == 1);
 
     /* a playlist's page, and taking the song off it in edit mode */
-    run(0.2); tap(160, 300); run(0.2);
+    run(0.4);
     for (i = 0; i < 3; i++) press(BTN_TRIANGLE);      /* Songs, Artists, Scores, Playlists */
     press(BTN_DOWN); press(BTN_CROSS); run(0.2); snap("15_playlist_page"); say("playlist page");
     check("playlist page", field("page=") == 1);

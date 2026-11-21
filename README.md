@@ -107,6 +107,10 @@ This project's own choices (constants at the top of `src/game.c`):
 
 In the vertical layout, hold the Vita turned a quarter turn clockwise.
 
+The game opens straight on the song list (there is no title screen; the PS
+button leaves it as usual). The menus fill the whole screen in both layouts:
+the landscape layout widens them, the vertical layout makes them taller.
+
 ## What you need
 
 ### 1. The game
@@ -303,7 +307,8 @@ covers pause, the vertical layout and the song list, with AddressSanitizer on.
 ## Layout
 
 ```
-src/game.c       menus, gameplay, scoring, HUD (logical 320x480 points)
+src/game.c       menus, gameplay, scoring, HUD (in points: 320x480 for a song;
+                 the menus as wide or tall as the screen allows)
 src/theme.c      loads and plays a song's theme (scenery, lanes, reactions)
 src/plat.h       platform interface
 src/plat_sdl.c   SDL2 backend: touch, buttons, Ogg music stream, WAV effects
