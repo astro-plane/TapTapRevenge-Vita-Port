@@ -1374,10 +1374,8 @@ static void list_draw(void)
 /* ------------------------------------------- song and results screens -- */
 
 /* Both are laid out like a classic phone's "now playing" screen: a glossy
- * black bar with the artist, title and length; the cover in the middle over a
- * dimmed full-width copy of itself (the covers are only 64x64, so the big
- * copy is a backdrop, not the picture); a row of transport buttons; and a
- * slider.  On the song screen the slider picks the difficulty and the buttons
+ * black bar with the artist, title and length; the cover in the middle on
+ * black; a row of transport buttons; and a slider.  On the song screen the slider picks the difficulty and the buttons
  * are previous song / play / next song.  On the results screen the slider
  * shows the share of notes hit and the middle button plays the song again. */
 
@@ -1470,12 +1468,10 @@ static void np_bar(const Song *s, const char *third)
     text_fit(LW / 2, 29, 12, 1, LW - 124, 0xa8a8a8ffu, third, 0);
 }
 
-/* the cover over a dimmed, full-width copy of itself */
+/* the cover, on black */
 static void np_art(int song, float size, float cy)
 {
     fill(0, NP_BAR, LW, NP_ART, 0x000000ffu);
-    draw_cover(song, LW / 2, NP_BAR + NP_ART / 2, NP_ART, 0x4a4a4affu);
-    shape(LW / 2 - size / 2 + 3, cy - size / 2 + 5, size, size, 0, 0, 0x00000070u, 0x00000070u);  /* shadow */
     draw_cover(song, LW / 2, cy, size, 0xffffffffu);
 }
 
