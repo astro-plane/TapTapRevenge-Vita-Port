@@ -203,7 +203,7 @@ app_data/charts/       343 note charts
 app_data/audio/        343 songs as .ogg
 app_data/themes/       120 themes
 app_data/gfx/  sfx/    menu graphics, song covers (art.png), font and two sounds
-app_data/icon0.png     the home screen icon, taken from the game
+app_data/icon0.png     the game's own icon (not used: the VPK has this project's)
 ```
 
 It can be interrupted and run again: songs already converted are kept. A song
@@ -327,9 +327,9 @@ tools/theme_dump.lua   runs one theme script and logs what it sets up
 tools/theme_compile.py turns that log into app_data/themes/<name>/theme.txt
 tools/pvrtc.py         decoder for PVRTC-compressed textures
 test/            headless renderer and scripted play-through
-sce_sys/         LiveArea files: wallpaper, start-button image and template.xml
-                 (the home screen icon comes from app_data/icon0.png). All of
-                 these must be 8-bit indexed PNGs
+sce_sys/         LiveArea files: home screen icon (three white dots on striped
+                 orange), wallpaper, start-button image and template.xml. All
+                 of these must be 8-bit indexed PNGs
 ```
 
 ## Note

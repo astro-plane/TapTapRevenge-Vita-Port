@@ -46,16 +46,13 @@ else()
     if(EMBED_DATA)
       message(FATAL_ERROR "app_data/songs.txt not found - run tools/prep_assets.py first (see README.md).")
     endif()
-    message(WARNING "app_data/ has not been built yet: the VPK will use the placeholder "
-                    "icon, and the game needs app_data copied to ux0:data/ttrvita/app_data/.")
+    message(WARNING "app_data/ has not been built yet: the game needs app_data copied to "
+                    "ux0:data/ttrvita/app_data/.")
   endif()
 
-  # Home screen icon: the game's own, as extracted by prep_assets.py, falling
-  # back to the plain placeholder in sce_sys/ when app_data/ has not been built.
+  # Home screen icon: this project's own (sce_sys/icon0.png: three white dots
+  # on striped orange), 128x128 and 8-bit indexed as LiveArea requires.
   set(VITA_ICON "${CMAKE_SOURCE_DIR}/sce_sys/icon0.png")
-  if(EXISTS "${CMAKE_SOURCE_DIR}/app_data/icon0.png")
-    set(VITA_ICON "${CMAKE_SOURCE_DIR}/app_data/icon0.png")
-  endif()
 
   target_include_directories(ttrvita PRIVATE "$ENV{VITASDK}/arm-vita-eabi/include/SDL2")
   # Static libraries: order matters (vorbisfile -> vorbis -> ogg).
