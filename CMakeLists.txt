@@ -75,6 +75,11 @@ else()
   )
   if(EMBED_DATA)
     list(APPEND VPK_FILES FILE app_data app_data)
+  elseif(EXISTS "${CMAKE_SOURCE_DIR}/app_data/gfx/art.png")
+    # The song covers are small (about 2 MB): they ride along in the VPK, so
+    # they need not be copied by hand. A copy in ux0:data/ttrvita/app_data/gfx/
+    # still wins. Re-run cmake after making art.png for the first time.
+    list(APPEND VPK_FILES FILE app_data/gfx/art.png app_data/gfx/art.png)
   endif()
 
   vita_create_self(ttrvita.self ttrvita)

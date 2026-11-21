@@ -90,6 +90,7 @@ This project's own choices (constants at the top of `src/game.c`):
 | Left / Right (or Up, Down) / Square (or Triangle, Cross) / Circle | | the four lanes, left to right, in a four-lane theme |
 | Shake the console, or L / R | W, or Q / E | shake (shake arrows, or start 8x) |
 | START | P | pause; then Circle quits the song |
+| Triangle, or Skip, while paused | | during Play All / Shuffle: skip to the next song |
 | SELECT | R | switch landscape / vertical layout |
 | Up / Down, L / R | arrows | move in the song list (L/R: previous / next letter) |
 | Touch the A-Z index | | jump to that letter |
@@ -245,8 +246,10 @@ or Lua, and works even where the songs were converted on another computer):
 python3 tools/prep_assets.py "/path/to/Tap Tap Revenge 3.ipa" app_data --art-only
 ```
 
-and copy the new `app_data/gfx/art.png` to `ux0:data/ttrvita/app_data/gfx/` on
-the Vita. Use the same `.ipa` the songs came from: the covers go by song number.
+then build the VPK again (run `cmake -S . -B build` once more first, so it
+notices the new file): the covers go inside the VPK, so there is nothing to
+copy. A copy in `ux0:data/ttrvita/app_data/gfx/` would be used instead. Use
+the same `.ipa` the songs came from: the covers go by song number.
 
 ## Options
 

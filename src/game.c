@@ -138,6 +138,10 @@ static void art_load(void)
     int w, h, i;
     snprintf(path, sizeof path, "%sgfx/art.png", plat_data_dir());
     px = png_load_rgba(path, &w, &h);
+#ifdef __vita__
+    if (!px)                                 /* the copy the build put in the VPK */
+        px = png_load_rgba("app0:app_data/gfx/art.png", &w, &h);
+#endif
     if (!px)
         return;                              /* no covers: lettered tiles */
     art_tiles = (w / ART_TILE) * (h / ART_TILE);
@@ -564,6 +568,12 @@ static void lane_press(int lane, int by_shake)
     }
 }
 
+static void queue_next(void);
+
+/* the "skip" button on the pause screen, during Play All / Shuffle */
+#define SKIP_Y (LH * 0.40f + 78)
+#define SKIP_H 40.0f
+
 static void play_update(const PlatInput *in, double dt)
 {
     int i, lane;
@@ -574,6 +584,16 @@ static void play_update(const PlatInput *in, double dt)
         plat_sfx("click");
     }
     if (paused) {
+        if (queue_pos >= 0 && ((in->pressed & BTN_TRIANGLE) ||
+            (ptr.released && ptr.moved < 8 && ptr.y >= SKIP_Y && ptr.y < SKIP_Y + SKIP_H &&
+             fabsf(ptr.x - LW / 2) < 120))) {
+            int keep = queue_pos;            /* skip: no result, straight to the next song */
+            plat_sfx("click");
+            end_song(SC_LIST);               /* (which ends the queue: put it back) */
+            queue_pos = keep;
+            queue_next();
+            return;
+        }
         if (in->pressed & (BTN_CIRCLE | BTN_SELECT))        /* give up */
             end_song(SC_LIST);
         return;
@@ -753,7 +773,20 @@ static void play_draw(void)
     if (paused) {
         fill(0, 0, LW, LH, 0x000000b0u);
         text(LW / 2, LH * 0.40f, 30, 1, 0, 0xffffffffu, "PAUSED");
-        text(LW / 2, LH * 0.40f + 45, 15, 1, 0, 0xc0c0c0ffu, "START: continue    O: quit song");
+        if (queue_pos < 0) {
+            text(LW / 2, LH * 0.40f + 45, 15, 1, 0, 0xc0c0c0ffu, "START: continue    O: quit song");
+        } else {                             /* Play All / Shuffle: a skip button too */
+            char nb[96];
+            int last = queue_pos + 1 >= n_queue;
+            text(LW / 2, LH * 0.40f + 45, 15, 1, 0, 0xc0c0c0ffu, "START: continue    O: stop playing");
+            fill(LW / 2 - 120, SKIP_Y, 240, SKIP_H, 0xffffffffu);
+            fill(LW / 2 - 118, SKIP_Y + 2, 236, SKIP_H - 4, 0x2a2a2effu);
+            text(LW / 2, SKIP_Y + 9, 18, 1, 0, 0xffffffffu, last ? "Skip (last song)" : "Skip song  (Triangle)");
+            if (!last) {
+                snprintf(nb, sizeof nb, "Next: %s", songs[queue[queue_pos + 1]].title);
+                text(LW / 2, SKIP_Y + SKIP_H + 10, 14, 1, LW - 20, 0xa8a8a8ffu, nb);
+            }
+        }
     }
 }
 

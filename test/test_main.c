@@ -295,6 +295,14 @@ int main(int argc, char **argv)
     check("artist page", field("page=") == 1);
     press(BTN_CROSS); run(0.1);                       /* Play All */
     check("play all starts a song", field("scene=") == 3 && field("queue=") == 0);
+    {
+        long was = field("num=");
+        in.held = BTN_START; frame(); in.held = 0; frame();
+        snap("12a_pause_skip");
+        press(BTN_TRIANGLE); run(0.1);
+        check("skip from the pause screen plays the next song",
+              field("scene=") == 3 && field("queue=") == 1 && field("num=") != was && field("paused=") == 0);
+    }
     in.held = BTN_START; frame(); in.held = 0; frame();
     press(BTN_CIRCLE); run(0.1);
     check("quitting a song ends play all", field("scene=") == 1 && field("queue=") == -1);
