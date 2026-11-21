@@ -33,6 +33,11 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
 - Score, streak, 2x/3x/4x multipliers, and an 8x "revenge" mode
 - A saved best for each song and difficulty, shown in the song list, on the
   difficulty screen and on the results screen
+- The game's own HUD, drawn from its HUD sheet where the original put it: a
+  bar along the top (streak, score, hit %, song progress), the multiplier tube
+  on the left and the early / late timing tube on the right. A few themes have
+  a mock-up of it painted into their background, which this covers, as the
+  original did
 - Landscape and vertical layouts, pause
 
 Not included: everything online (store, leaderboards, battles, chat), two-player

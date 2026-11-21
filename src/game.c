@@ -413,6 +413,8 @@ static int streak, best_streak, mult, revenge, n_hit, n_judged;
 static int lane_down[MAX_LANES], lane_was[MAX_LANES];        /* lane held this frame / last   */
 static double splash_t[MAX_LANES];
 static double fb_t = -10; static int fb_kind; /* banner: 0 miss 1 great 2..4 = 2x/3x/4x 5 = 8x */
+static float acc_off;                        /* the last hit: seconds late (+) or early (-) */
+static int acc_miss;                         /* the last judgement was a miss */
 static double hold_tick[MAX_LANES];
 static int play_started;
 static int pos_lane[MAX_LANES];              /* lanes in left-to-right screen order */
@@ -453,6 +455,7 @@ static void on_hit(int lane, int shake, int pts, int quality)
 static void on_miss(int lane, int shake)
 {
     n_judged++;
+    acc_miss = 1;
     if (streak >= 5 || revenge)
         feedback(0);
     streak = 0;
@@ -495,6 +498,8 @@ static void start_song(void)
     paused = 0;
     song_t = 0;
     fb_t = -10;
+    acc_off = 0;
+    acc_miss = 0;
     memset(lane_was, 0, sizeof lane_was);
     memset(splash_t, 0, sizeof splash_t);
     snprintf(path, sizeof path, "%saudio/%s.ogg", plat_data_dir(), s->num);
@@ -553,6 +558,8 @@ static void lane_press(int lane, int by_shake)
             continue;
         if (by_shake && !n->shake)
             continue;
+        acc_off = (float)-d;                 /* d: note time minus now, so early is positive */
+        acc_miss = 0;
         d = fabs(d);
         if (d <= WIN_PERFECT)   on_hit(lane, n->shake, PTS_PERFECT, Q_PERFECT);
         else if (d <= WIN_GOOD) on_hit(lane, n->shake, PTS_GOOD, Q_GOOD);
@@ -744,16 +751,36 @@ static void play_draw(void)
 
     theme_draw_scene(1);                     /* glows and overlays in front */
 
-    /* HUD */
-    fill(0, 0, LW, 34, 0x000000a0u);
-    snprintf(buf, sizeof buf, "%ld", score);
-    text(8, 6, 22, 0, 0, 0xffffffffu, buf);
-    snprintf(buf, sizeof buf, "x%d", mult);
-    text(LW / 2, 6, 22, 1, 0, mult >= 8 ? 0xffd040ffu : mult > 1 ? 0x60ff80ffu : 0xa0a0a0ffu, buf);
-    snprintf(buf, sizeof buf, "streak %d", streak);
-    text(LW - 8, 9, 16, 2, 0, 0xffffffffu, buf);
-    if (chart_end > 0)
-        fill(0, 34, LW * (float)(song_t / chart_end < 0 ? 0 : song_t / chart_end > 1 ? 1 : song_t / chart_end), 2, 0x40c0ffffu);
+    /* HUD: the game's own, from the HUD sheet (hudmatrix.png), where the
+     * original drew it: a solid bar along the top, the multiplier tube on the
+     * left and the timing tube on the right.  Some themes have a mock-up of
+     * it painted into their background (one even says "REMOVE THIS"); the
+     * original covered that with the real thing, and so must we. */
+    {
+        float bx = (LW - 320) / 2, prog = chart_end > 0 ? (float)(song_t / chart_end) : 0;
+        int mf = mult >= 16 ? 5 : mult >= 8 ? 4 : mult >= 2 ? mult - 1 : 0;   /* tube: empty, 2x, 3x, 4x, 8x, 16x */
+        int af = 4;                                                             /* timing: 4 is spot on */
+        if (acc_miss) {
+            af = 0;                          /* red: a miss */
+        } else if (n_hit) {
+            float r = acc_off / (float)WIN_OK;   /* -1 early .. +1 late */
+            af = r < -0.6f ? 1 : r < -0.3f ? 2 : r < -0.1f ? 3 : r <= 0.1f ? 4 : r <= 0.3f ? 5 : r <= 0.6f ? 6 : 7;
+        }
+        if (prog < 0) prog = 0;
+        if (prog > 1) prog = 1;
+        fill(0, 0, LW, 40, 0x000000ffu);
+        draw(&tx_hud, 0, 0, 320, 40, bx + 160, 20, 320, 40, 0, 0xffffffffu, 0);
+        fill(bx + 41, 34.5f, 238 * prog, 3, 0x40c0ffffu);             /* song progress, in its slot */
+        snprintf(buf, sizeof buf, "%d", streak);
+        text(bx + 6, 1, 19, 0, 0, 0xffffffffu, buf);
+        snprintf(buf, sizeof buf, "%d", n_judged ? (int)(100.0 * n_hit / n_judged + 0.5) : 100);
+        text(bx + 314, 1, 19, 2, 0, 0xffffffffu, buf);
+        snprintf(buf, sizeof buf, "%ld", score);
+        text(bx + 160, 3, 24, 1, 0, mult >= 8 ? 0xffd040ffu : 0xffffffffu, buf);
+        draw(&tx_hud, 321 + 22 * mf, 0, 20, 109, bx + 19, 38 + 54.5f, 20, 109, 0, 0xffffffffu, 0);
+        draw(&tx_hud, 321 + 22 * af, 119, 20, 119, bx + 299, 38 + 59.5f, 20, 119, 0, 0xffffffffu, 0);
+        draw(&tx_hud, 500, 121, 12, 93, bx + 314, 40 + 46.5f, 12, 93, 0, 0xffffffffu, 0);   /* EARLY / LATE */
+    }
     if (streak >= STREAK_REVENGE && !revenge && fmod(now_t, 0.8) < 0.5)
         draw(&tx_hud, 384, 424, 128, 87, LW / 2, LH * 0.52f, 128, 87, 0, 0xffffffffu, 0);
 
