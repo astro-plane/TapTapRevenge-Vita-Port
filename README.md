@@ -12,13 +12,19 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
 ## What is in the game
 
 - Song list (343 tracks) in the style of a classic phone music library:
-  alphabetical sections with an A-Z index, Songs / Artists / Top Scores tabs,
-  a Shuffle button, and three looks to switch between (silver, blue-grey
+  alphabetical sections with an A-Z index; Playlists / Songs / Artists /
+  Top Scores tabs; and three looks to switch between (silver, blue-grey
   with see-through section headers, or dark with an orange highlight). Each
   song's cover art from the game is shown beside it in the silver and dark
   looks. Picking a song opens a "now playing" style screen: the cover, a
   slider for the difficulty, and previous / play / next buttons; the results
   screen uses the same layout
+- Play All and Shuffle on each artist's and each playlist's page (and the
+  Shuffle tab for every song): the songs play one after another, the results
+  screen moving on to the next after 8 seconds
+- Playlists: make them on the Playlists tab, put songs on them from a song's
+  screen (the list button), take songs off or delete one with Edit. They are
+  kept in the settings file with your scores
 - Each song's own theme (119 of them): background, lane shapes, note art,
   note speed, moving/pulsing scenery, and the colour and light changes on
   streaks, multipliers and misses
@@ -87,13 +93,17 @@ This project's own choices (constants at the top of `src/game.c`):
 | SELECT | R | switch landscape / vertical layout |
 | Up / Down, L / R | arrows | move in the song list (L/R: previous / next letter) |
 | Touch the A-Z index | | jump to that letter |
-| Triangle, or the tab bar | | Songs / Artists / Top Scores |
-| Square, or the Shuffle tab | | pick a song at random |
+| Triangle, or the tab bar | | Playlists / Songs / Artists / Top Scores |
+| Square | | shuffle the songs on the page (the Shuffle tab: every song) |
+| Triangle on a playlist's page, or Edit | | edit mode: tap a song to take it off |
 | START, or the Style button | | switch between the three list looks (saved) |
 | Cross / Circle | Enter / Esc | choose / back |
 | Left / Right (or Up / Down), or the slider | | song screen: pick the difficulty |
 | L / R, or the arrow buttons | | song screen: previous / next song |
+| Square, or the list button | | song screen: choose the playlists it is on |
 | Triangle, or the middle button | | results: play the song again |
+| Cross, or the middle button | | results during Play All / Shuffle: next song now |
+| Circle | | results during Play All / Shuffle: stop |
 
 In the vertical layout, hold the Vita turned a quarter turn clockwise.
 
@@ -267,7 +277,8 @@ TTR_DATA=app_data/ ./build-pc/ttrvita
 ## Settings and scores
 
 Both live in `ux0:data/ttrvita/settings.txt` (`ttrvita_settings.txt` in the PC
-build): the screen layout, and your best run of each song at each difficulty.
+build): the screen layout and list look, your playlists, and your best run of
+each song at each difficulty.
 "Best" is your highest-scoring run, with that run's streak and accuracy, and
 it is written as soon as you beat it. Rebuilding `app_data/` with a different
 set of songs renumbers them, which drops scores for songs no longer there.

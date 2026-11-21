@@ -486,6 +486,8 @@ static void start_song(void)
 static void settings_save(void);
 
 static int list_dirty;                       /* the song list must be rebuilt (menus, below) */
+static int *queue, n_queue, queue_pos = -1;  /* Play All / Shuffle: songs to play in turn (menus) */
+static double next_at;                       /* when the results screen moves on to the next one */
 static Best prev_best;                       /* what it was before this run */
 static int new_best;
 
@@ -515,6 +517,10 @@ static void end_song(int to_scene)
     view_setup();
     paused = 0;
     scene = to_scene;
+    if (to_scene == SC_RESULT)
+        next_at = now_t + 8.0;               /* QUEUE_WAIT, below */
+    else
+        queue_pos = -1;                      /* quitting a song ends Play All / Shuffle */
 }
 
 /* a press in a lane (finger, lane button or shake) */
@@ -742,11 +748,16 @@ static void play_draw(void)
 
 /* The song list looks like a classic phone music library: a title bar,
  * alphabetical sections with a header that sticks to the top, an A-Z index
- * down the right, rows of title and artist, and a tab bar.  Three styles:
- * SKIN_SILVER (light grey bars, a cover tile on each row), SKIN_BLUE
- * (blue-grey bars, see-through section headers, text-only rows) and
- * SKIN_DARK (near-black, cover tiles, orange highlight and accents).  Everything
- * is drawn with plain fills, so no extra artwork is needed. */
+ * down the right, rows with a cover, and a tab bar.  Three styles:
+ * SKIN_SILVER (light grey bars, a cover on each row), SKIN_BLUE (blue-grey
+ * bars, see-through section headers, text-only rows) and SKIN_DARK
+ * (near-black, covers, orange highlight and accents).
+ *
+ * Tabs: Playlists, Songs, Artists, Top Scores, and Shuffle (plays every song
+ * in a random order).  An artist or a playlist opens a page of its songs
+ * with Play All and Shuffle at the top; those play the songs one after
+ * another (the "queue", see the results screen).  Everything is drawn with
+ * plain fills, so no extra artwork is needed. */
 
 #define NAV_H    44.0f
 #define TAB_H    49.0f
@@ -756,23 +767,99 @@ static void play_draw(void)
 #define IDX_W    18.0f
 #define LIST_TOP NAV_H
 #define LIST_BOT (LH - TAB_H)
+#define N_TABS   5
 
 enum { SKIN_SILVER, SKIN_BLUE, SKIN_DARK, N_SKINS };
 #define DARK_ORANGE 0xff9500ffu                /* dark style: accents and the highlight */
 static int skin;                             /* saved in the settings file */
 
-enum { V_SONGS, V_ARTISTS, V_SCORES, N_VIEWS };
-static const char *view_title[N_VIEWS] = { "Songs", "Artists", "Top Scores" };
+enum { V_SONGS, V_ARTISTS, V_SCORES, V_PLAYLISTS, N_VIEWS };
+static const char *view_title[N_VIEWS] = { "Songs", "Artists", "Top Scores", "Playlists" };
+static const int tab_view[N_TABS] = { V_PLAYLISTS, V_SONGS, V_ARTISTS, V_SCORES, -1 };   /* -1: Shuffle */
+static const char *tab_label[N_TABS] = { "Playlists", "Songs", "Artists", "Scores", "Shuffle" };
 
-/* one line of the list: a song row (song >= 0), a section header (-1, hdr
- * is its letter) or the footer at the end (-2) */
-typedef struct { int song; char hdr; float y, h; } Entry;
+/* one line of the list */
+enum { E_SONG, E_HDR, E_FOOT, E_ARTIST, E_PLIST, E_ACT };
+enum { A_PLAY_ALL, A_SHUFFLE, A_NEW_PLIST, A_DEL_PLIST };
+typedef struct {
+    int kind;
+    int arg;                                 /* song, playlist, or A_* action */
+    int count;                               /* artist: songs; song on a playlist page: its place */
+    char hdr;                                /* section header: its letter */
+    float y, h;
+} Entry;
 static Entry *ents;
-static int *ord;                             /* the songs of the current view, in order */
-static int n_ents, n_rows, list_view, built_view = -1, list_dirty = 1;
+static int *ord;                             /* songs being sorted */
+static int n_ents, n_rows, list_view, built_view = -1;
 static float list_total;
 static int touch_row = -1, idx_active, press_zone;
+static char foot_text[64];
 enum { Z_LIST, Z_NAV, Z_TAB, Z_INDEX };
+
+/* page: 0 = the tab's own list, 1 = one artist's or one playlist's songs */
+static int list_page, page_song = -1, page_pl = -1, edit_mode;
+static float top_scroll;                     /* where the tab's list was, to go back to */
+static int top_kind = -1, top_arg = -1;
+
+/* the cursor: which item it is on, so it survives rebuilding the list */
+static int cur_kind = E_SONG, cur_arg = -1;
+
+/* playlists, saved in the settings file */
+#define MAX_PL 24
+#define MAX_PL_SONGS 512
+typedef struct { char name[32]; int n; short song[MAX_PL_SONGS]; } Playlist;
+static Playlist pls[MAX_PL];
+static int n_pls;
+
+static int pl_has(int p, int song)
+{
+    int k;
+    for (k = 0; k < pls[p].n; k++)
+        if (pls[p].song[k] == song) return 1;
+    return 0;
+}
+
+static int pl_new(void)                      /* "Playlist 1", "Playlist 2"...: the first free number */
+{
+    int k, p;
+    char name[32];
+    if (n_pls >= MAX_PL) return -1;
+    for (k = 1; ; k++) {
+        snprintf(name, sizeof name, "Playlist %d", k);
+        for (p = 0; p < n_pls && strcmp(pls[p].name, name); p++) ;
+        if (p == n_pls) break;
+    }
+    snprintf(pls[n_pls].name, sizeof pls[0].name, "%s", name);
+    pls[n_pls].n = 0;
+    return n_pls++;
+}
+
+static void pl_add(int p, int song)
+{
+    if (p >= 0 && p < n_pls && song >= 0 && !pl_has(p, song) && pls[p].n < MAX_PL_SONGS)
+        pls[p].song[pls[p].n++] = (short)song;
+}
+
+static void pl_remove_at(int p, int k)
+{
+    if (p < 0 || p >= n_pls || k < 0 || k >= pls[p].n) return;
+    memmove(&pls[p].song[k], &pls[p].song[k + 1], sizeof pls[p].song[0] * (size_t)(pls[p].n - k - 1));
+    pls[p].n--;
+}
+
+static void pl_remove_song(int p, int song)
+{
+    int k;
+    for (k = 0; k < pls[p].n; k++)
+        if (pls[p].song[k] == song) { pl_remove_at(p, k); return; }
+}
+
+static void pl_delete(int p)
+{
+    if (p < 0 || p >= n_pls) return;
+    memmove(&pls[p], &pls[p + 1], sizeof pls[0] * (size_t)(n_pls - p - 1));
+    n_pls--;
+}
 
 static long top_best(int song)               /* the best score of any difficulty */
 {
@@ -805,61 +892,118 @@ static int song_cmp(const void *pa, const void *pb)
     return a - b;
 }
 
-static int sectioned(void) { return list_view != V_SCORES; }
+static int same_artist(int a, int b) { return !strcmp(songs[a].akey, songs[b].akey); }
+static int sectioned(void) { return !list_page && (list_view == V_SONGS || list_view == V_ARTISTS); }
+static int on_playlist_page(void) { return list_page && list_view == V_PLAYLISTS && page_pl >= 0 && page_pl < n_pls; }
+static int selectable(int e) { return e >= 0 && e < n_ents && ents[e].kind != E_HDR && ents[e].kind != E_FOOT; }
+
+static void ent_add(int kind, int arg, int count, char hdr, float h)
+{
+    Entry *e = &ents[n_ents++];
+    e->kind = kind; e->arg = arg; e->count = count; e->hdr = hdr;
+    e->y = list_total; e->h = h;
+    list_total += h;
+    if (kind == E_SONG) n_rows++;
+}
+
+/* the songs in ord[0..n) as rows, with a letter header wherever the letter changes */
+static void add_songs(int n, int headers)
+{
+    int k;
+    char last = 0;
+    for (k = 0; k < n; k++) {
+        char letter = songs[ord[k]].tletter;
+        if (headers && letter != last) { ent_add(E_HDR, 0, 0, letter, HDR_H); last = letter; }
+        ent_add(E_SONG, ord[k], k, 0, ROW_H);
+    }
+}
 
 static void list_build(void)
 {
     int i, k, n = 0;
-    char last = 0;
-    float y = 0;
     if (!ents) {
-        ents = malloc(sizeof *ents * (size_t)(n_songs + 30));
+        ents = malloc(sizeof *ents * (size_t)(2 * n_songs + MAX_PL + 40));
         ord = malloc(sizeof *ord * (size_t)(n_songs + 1));
         if (!ents || !ord) { free(ents); free(ord); ents = NULL; ord = NULL; return; }
     }
-    for (i = 0; i < n_songs; i++)
-        if (list_view != V_SCORES || top_best(i) > 0)
-            ord[n++] = i;
-    cmp_view = list_view;
-    qsort(ord, (size_t)n, sizeof *ord, song_cmp);
-    n_ents = 0;
-    for (k = 0; k < n; k++) {
-        const Song *s = &songs[ord[k]];
-        char letter = list_view == V_ARTISTS ? s->aletter : s->tletter;
-        Entry *e;
-        if (sectioned() && letter != last) {
-            e = &ents[n_ents++];
-            e->song = -1; e->hdr = letter; e->y = y; e->h = HDR_H;
-            y += HDR_H;
-            last = letter;
+    n_ents = n_rows = 0;
+    list_total = 0;
+    if (list_page && list_view == V_ARTISTS && page_song >= 0) {
+        for (i = 0; i < n_songs; i++)
+            if (same_artist(i, page_song)) ord[n++] = i;
+        cmp_view = V_SONGS;
+        qsort(ord, (size_t)n, sizeof *ord, song_cmp);
+        ent_add(E_ACT, A_PLAY_ALL, 0, 0, ROW_H);
+        ent_add(E_ACT, A_SHUFFLE, 0, 0, ROW_H);
+        add_songs(n, 0);
+        snprintf(foot_text, sizeof foot_text, "%d %s", n, n == 1 ? "Song" : "Songs");
+    } else if (on_playlist_page()) {
+        const Playlist *p = &pls[page_pl];
+        if (p->n && !edit_mode) {
+            ent_add(E_ACT, A_PLAY_ALL, 0, 0, ROW_H);
+            ent_add(E_ACT, A_SHUFFLE, 0, 0, ROW_H);
         }
-        e = &ents[n_ents++];
-        e->song = ord[k]; e->hdr = 0; e->y = y; e->h = ROW_H;
-        y += ROW_H;
+        for (k = 0; k < p->n; k++)
+            ent_add(E_SONG, p->song[k], k, 0, ROW_H);
+        if (edit_mode)
+            ent_add(E_ACT, A_DEL_PLIST, 0, 0, ROW_H);
+        if (p->n)
+            snprintf(foot_text, sizeof foot_text, "%d %s", p->n, p->n == 1 ? "Song" : "Songs");
+        else
+            snprintf(foot_text, sizeof foot_text, "Add songs from a song's screen");
+    } else if (list_view == V_PLAYLISTS) {
+        ent_add(E_ACT, A_NEW_PLIST, 0, 0, ROW_H);
+        for (i = 0; i < n_pls; i++)
+            ent_add(E_PLIST, i, pls[i].n, 0, ROW_H);
+        if (n_pls)
+            snprintf(foot_text, sizeof foot_text, "%d %s", n_pls, n_pls == 1 ? "Playlist" : "Playlists");
+        else
+            snprintf(foot_text, sizeof foot_text, "No playlists yet");
+    } else if (list_view == V_ARTISTS) {
+        char last = 0;
+        int artists = 0;
+        for (i = 0; i < n_songs; i++) ord[n++] = i;
+        cmp_view = V_ARTISTS;
+        qsort(ord, (size_t)n, sizeof *ord, song_cmp);
+        for (k = 0; k < n; k = i) {          /* one row per artist */
+            char letter = songs[ord[k]].aletter;
+            for (i = k + 1; i < n && same_artist(ord[i], ord[k]); i++) ;
+            if (letter != last) { ent_add(E_HDR, 0, 0, letter, HDR_H); last = letter; }
+            ent_add(E_ARTIST, ord[k], i - k, 0, ROW_H);
+            artists++;
+        }
+        snprintf(foot_text, sizeof foot_text, "%d %s", artists, artists == 1 ? "Artist" : "Artists");
+    } else {
+        for (i = 0; i < n_songs; i++)
+            if (list_view != V_SCORES || top_best(i) > 0) ord[n++] = i;
+        cmp_view = list_view;
+        qsort(ord, (size_t)n, sizeof *ord, song_cmp);
+        add_songs(n, list_view == V_SONGS);
+        if (list_view == V_SCORES && n == 0)
+            snprintf(foot_text, sizeof foot_text, "No scores yet");
+        else
+            snprintf(foot_text, sizeof foot_text, "%d %s", n, list_view == V_SCORES ? "Played" : n == 1 ? "Song" : "Songs");
     }
-    ents[n_ents].song = -2; ents[n_ents].hdr = 0; ents[n_ents].y = y; ents[n_ents].h = FOOT_H;
-    n_ents++;
-    list_total = y + FOOT_H;
-    n_rows = n;
+    ent_add(E_FOOT, 0, 0, 0, FOOT_H);
     built_view = list_view;
     list_dirty = 0;
 }
 
-static int sel_ent(void)
+static int cur_ent(void)
 {
     int e;
     for (e = 0; e < n_ents; e++)
-        if (ents[e].song == sel_song && sel_song >= 0)
+        if (selectable(e) && ents[e].kind == cur_kind && ents[e].arg == cur_arg)
             return e;
     return -1;
 }
 
-static int first_row(void)
+static void set_cursor(int e)
 {
-    int e;
-    for (e = 0; e < n_ents; e++)
-        if (ents[e].song >= 0) return e;
-    return -1;
+    if (!selectable(e)) return;
+    cur_kind = ents[e].kind;
+    cur_arg = ents[e].arg;
+    if (cur_kind == E_SONG) sel_song = cur_arg;
 }
 
 static void list_clamp(void)
@@ -874,8 +1018,8 @@ static void list_show(int e)
     float top, bot;
     if (e < 0 || e >= n_ents) return;
     top = ents[e].y;
-    if (e > 0 && ents[e - 1].song == -1) top = ents[e - 1].y;   /* show its section header too */
-    else if (sectioned()) top -= HDR_H;                         /* not under the sticky header */
+    if (e > 0 && ents[e - 1].kind == E_HDR) top = ents[e - 1].y;   /* show its section header too */
+    else if (sectioned()) top -= HDR_H;                            /* not under the sticky header */
     bot = ents[e].y + ents[e].h;
     if (top < list_scroll) list_scroll = top;
     if (bot > list_scroll + (LIST_BOT - LIST_TOP)) list_scroll = bot - (LIST_BOT - LIST_TOP);
@@ -884,12 +1028,14 @@ static void list_show(int e)
 
 static void list_ensure(void)
 {
+    int e;
     if (!list_dirty && built_view == list_view && ents)
         return;
     list_build();
     if (!ents) return;
-    if (sel_ent() < 0 && first_row() >= 0)
-        sel_song = ents[first_row()].song;
+    if (cur_ent() < 0)
+        for (e = 0; e < n_ents; e++)
+            if (selectable(e)) { set_cursor(e); break; }
     list_clamp();
 }
 
@@ -927,25 +1073,213 @@ static void list_choose(void)
     scene = SC_LEVEL;
 }
 
-static void list_set_view(int v)
+/* ---- the queue: Play All and Shuffle play songs back to back ---- */
+
+#define QUEUE_WAIT 8.0                       /* seconds on the results screen before the next song */
+
+static void queue_play(void)
 {
-    if (v == list_view) return;
-    list_view = v;
+    int tries;
+    for (tries = 0; queue_pos >= 0 && queue_pos < n_queue && tries < n_queue; tries++) {
+        sel_song = queue[queue_pos];
+        cur_kind = E_SONG;                   /* back on the list, the cursor is on the last one played */
+        cur_arg = sel_song;
+        sel_level = first_level(songs[sel_song].levels, sel_level ? sel_level : 2);
+        start_song();
+        if (scene == SC_PLAY) return;
+        queue_pos++;                         /* this one would not start: go on to the next */
+    }
+    queue_pos = -1;
+    scene = SC_LIST;
+}
+
+/* all: every song, else the songs of the current page */
+static void queue_start(int all, int shuffle)
+{
+    int e, k, n = 0;
+    if (!queue) queue = malloc(sizeof *queue * (size_t)(n_songs + 1));
+    if (!queue) return;
+    if (all)
+        for (k = 0; k < n_songs; k++) queue[n++] = k;
+    else
+        for (e = 0; e < n_ents; e++)
+            if (ents[e].kind == E_SONG) queue[n++] = ents[e].arg;
+    if (n == 0) return;
+    if (shuffle) {
+        srand((unsigned)(now_t * 1000.0) ^ (unsigned)n);
+        for (k = n - 1; k > 0; k--) {
+            int j = rand() % (k + 1), t = queue[k];
+            queue[k] = queue[j];
+            queue[j] = t;
+        }
+    }
+    n_queue = n;
+    queue_pos = 0;
+    plat_sfx("click");
+    queue_play();
+}
+
+/* ---- pages ---- */
+
+static void list_open_page(void)
+{
+    top_scroll = list_scroll;
+    top_kind = cur_kind;
+    top_arg = cur_arg;
+    list_page = 1;
+    edit_mode = 0;
     list_scroll = 0;
     list_vel = 0;
+    cur_kind = -1;
+    list_dirty = 1;
     list_ensure();
-    list_show(sel_ent());
+    plat_sfx("slide");
+}
+
+static void list_back(void)
+{
+    if (!list_page) {
+        scene = SC_TITLE;
+        return;
+    }
+    list_page = 0;
+    edit_mode = 0;
+    cur_kind = top_kind;
+    cur_arg = top_arg;
+    list_dirty = 1;
+    list_ensure();
+    list_scroll = top_scroll;
+    list_vel = 0;
+    list_clamp();
+    plat_sfx("slide");
+}
+
+static void list_set_view(int v)
+{
+    if (v == list_view && !list_page) return;
+    list_view = v;
+    list_page = 0;
+    edit_mode = 0;
+    list_scroll = 0;
+    list_vel = 0;
+    cur_kind = E_SONG;                       /* stay on the chosen song where the tab lists songs */
+    cur_arg = sel_song;
+    list_dirty = 1;
+    list_ensure();
+    list_show(cur_ent());
     plat_sfx("click");
 }
 
-static void list_random(void)
+static void toggle_edit(void)
 {
-    if (n_rows <= 0) return;
-    srand((unsigned)(now_t * 1000.0));
-    sel_song = ord[rand() % n_rows];
-    list_show(sel_ent());
-    list_choose();
+    edit_mode = !edit_mode;
+    cur_kind = -1;
+    list_dirty = 1;
+    list_ensure();
+    plat_sfx("click");
 }
+
+/* ---- the action sheet: buttons that slide up from the bottom ---- */
+
+enum { SH_NONE, SH_ADD, SH_DELETE };
+enum { SA_NEW = -1, SA_CLOSE = -2, SA_DELETE = -3 };
+#define SHEET_VIS  6                         /* buttons shown at once; more scroll */
+#define SHEET_ROW  50.0f
+static struct {
+    int kind, n, sel, first;
+    int arg[MAX_PL + 3], style[MAX_PL + 3];  /* style 0 normal, 1 red, 2 dark (close) */
+    char label[MAX_PL + 3][36];
+} sheet;
+
+static void sheet_add(const char *label, int arg, int style)
+{
+    snprintf(sheet.label[sheet.n], sizeof sheet.label[0], "%s", label);
+    sheet.arg[sheet.n] = arg;
+    sheet.style[sheet.n] = style;
+    sheet.n++;
+}
+
+static void sheet_open_add(void)             /* tick which playlists the chosen song is on */
+{
+    int p, keep = sheet.kind == SH_ADD ? sheet.sel : 0;
+    sheet.kind = SH_ADD;
+    sheet.n = 0;
+    for (p = 0; p < n_pls; p++) sheet_add(pls[p].name, p, 0);
+    if (n_pls < MAX_PL) sheet_add("New Playlist", SA_NEW, 0);
+    sheet_add("Done", SA_CLOSE, 2);
+    sheet.sel = keep < sheet.n ? keep : 0;
+    if (sheet.first > sheet.sel) sheet.first = sheet.sel;
+    if (sheet.sel >= sheet.first + SHEET_VIS) sheet.first = sheet.sel - SHEET_VIS + 1;
+    if (keep == 0) sheet.first = 0;
+}
+
+static void sheet_open_delete(void)
+{
+    sheet.kind = SH_DELETE;
+    sheet.n = sheet.sel = sheet.first = 0;
+    sheet_add("Delete Playlist", SA_DELETE, 1);
+    sheet_add("Cancel", SA_CLOSE, 2);
+}
+
+static float sheet_top(void)
+{
+    int v = sheet.n < SHEET_VIS ? sheet.n : SHEET_VIS;
+    return LH - (14 + (sheet.kind == SH_ADD ? 30 : 0) + v * SHEET_ROW + 6);
+}
+
+static void sheet_activate(int i)
+{
+    int a = sheet.arg[i], p;
+    plat_sfx("click");
+    if (a == SA_CLOSE) {
+        sheet.kind = SH_NONE;
+    } else if (a == SA_DELETE) {
+        sheet.kind = SH_NONE;
+        pl_delete(page_pl);
+        page_pl = -1;
+        settings_save();
+        list_back();
+    } else if (a == SA_NEW) {
+        p = pl_new();
+        pl_add(p, sel_song);
+        settings_save();
+        sheet.sel = p >= 0 ? p : sheet.sel;
+        sheet_open_add();
+    } else if (a >= 0 && a < n_pls) {
+        if (pl_has(a, sel_song)) pl_remove_song(a, sel_song);
+        else pl_add(a, sel_song);
+        settings_save();
+    }
+    list_dirty = 1;
+}
+
+/* 1 if the sheet is up (it takes every input then) */
+static int sheet_update(const PlatInput *in)
+{
+    if (!sheet.kind)
+        return 0;
+    if ((in->pressed & BTN_UP) && sheet.sel > 0) sheet.sel--;
+    if ((in->pressed & BTN_DOWN) && sheet.sel < sheet.n - 1) sheet.sel++;
+    if (sheet.sel < sheet.first) sheet.first = sheet.sel;
+    if (sheet.sel >= sheet.first + SHEET_VIS) sheet.first = sheet.sel - SHEET_VIS + 1;
+    if (in->pressed & BTN_CROSS) {
+        sheet_activate(sheet.sel);
+    } else if (in->pressed & BTN_CIRCLE) {
+        sheet.kind = SH_NONE;
+    } else if (ptr.released && ptr.moved < 8) {
+        float y0 = sheet_top() + 14 + (sheet.kind == SH_ADD ? 30 : 0);
+        int j = (int)floorf((ptr.y - y0) / SHEET_ROW);
+        if (ptr.y < sheet_top()) {
+            sheet.kind = SH_NONE;            /* a tap above the sheet closes it */
+        } else if (j >= 0 && j < SHEET_VIS && sheet.first + j < sheet.n && ptr.y - y0 - j * SHEET_ROW < 44) {
+            sheet.sel = sheet.first + j;
+            sheet_activate(sheet.sel);
+        }
+    }
+    return 1;
+}
+
+/* ---- the list itself ---- */
 
 /* the A-Z index: touching a letter jumps to that section, or the next one */
 #define IDX_TOP (LIST_TOP + 6)
@@ -956,7 +1290,7 @@ static void index_jump(float y)
     if (slot < 0) slot = 0;
     if (slot > 26) slot = 26;
     for (e = 0; e < n_ents; e++) {
-        if (ents[e].song != -1) continue;
+        if (ents[e].kind != E_HDR) continue;
         last = e;
         if (letter_rank(ents[e].hdr) >= slot) break;
     }
@@ -965,14 +1299,13 @@ static void index_jump(float y)
     list_scroll = ents[e].y;
     list_vel = 0;
     list_clamp();
-    if (e + 1 < n_ents && ents[e + 1].song >= 0)
-        sel_song = ents[e + 1].song;
+    set_cursor(e + 1);
 }
 
-/* the first row of the section an entry is in */
+/* the first item of the section an entry is in */
 static int sec_start(int e)
 {
-    while (e > 0 && ents[e - 1].song >= 0) e--;
+    while (selectable(e - 1)) e--;
     return e;
 }
 
@@ -985,21 +1318,63 @@ static int list_move(int cur, int step)
             e = sec_start(cur);
             if (e != cur) return e;
             e -= 2;                          /* skip this section's header */
-            return e >= 0 && ents[e].song >= 0 ? sec_start(e) : cur;
+            return selectable(e) ? sec_start(e) : cur;
         } else {
             for (e = cur + 1; e < n_ents; e++)
-                if (ents[e].song == -1 && e + 1 < n_ents && ents[e + 1].song >= 0) return e + 1;
+                if (ents[e].kind == E_HDR && selectable(e + 1)) return e + 1;
             for (e = n_ents - 1; e > cur; e--)
-                if (ents[e].song >= 0) return e;
+                if (selectable(e)) return e;
             return cur;
         }
     }
     for (k = 0, e = cur; k < abs(step); k++) {
-        do e += step < 0 ? -1 : 1; while (e >= 0 && e < n_ents && ents[e].song < 0);
+        do e += step < 0 ? -1 : 1; while (e >= 0 && e < n_ents && !selectable(e));
         if (e < 0 || e >= n_ents) break;
         last = e;
     }
     return last;
+}
+
+static void list_activate(int e)
+{
+    const Entry *en;
+    if (!selectable(e)) return;
+    set_cursor(e);
+    en = &ents[e];
+    switch (en->kind) {
+    case E_SONG:
+        if (edit_mode) {                     /* edit mode: a tap takes the song off the playlist */
+            pl_remove_at(page_pl, en->count);
+            settings_save();
+            list_dirty = 1;
+            plat_sfx("click");
+        } else {
+            list_choose();
+        }
+        break;
+    case E_ARTIST:
+        page_song = en->arg;
+        list_open_page();
+        break;
+    case E_PLIST:
+        page_pl = en->arg;
+        list_open_page();
+        break;
+    case E_ACT:
+        if (en->arg == A_PLAY_ALL) queue_start(0, 0);
+        else if (en->arg == A_SHUFFLE) queue_start(0, 1);
+        else if (en->arg == A_DEL_PLIST) sheet_open_delete();
+        else if (en->arg == A_NEW_PLIST) {
+            int p = pl_new();
+            if (p >= 0) {
+                settings_save();
+                list_dirty = 1;
+                page_pl = p;
+                list_open_page();
+            }
+        }
+        break;
+    }
 }
 
 static void list_update(const PlatInput *in, double dt)
@@ -1007,7 +1382,8 @@ static void list_update(const PlatInput *in, double dt)
     int step = 0, cur, e;
     list_ensure();
     if (!ents) return;
-    cur = sel_ent();
+    if (sheet_update(in)) { list_ensure(); return; }
+    cur = cur_ent();
     if (in->pressed & BTN_UP) { step = -1; repeat_t = 0.35; }
     if (in->pressed & BTN_DOWN) { step = 1; repeat_t = 0.35; }
     if (in->held & (BTN_UP | BTN_DOWN)) {    /* hold to keep scrolling */
@@ -1017,13 +1393,21 @@ static void list_update(const PlatInput *in, double dt)
     if (in->pressed & BTN_L) step = -2;
     if (in->pressed & BTN_R) step = 2;
     if (step && cur >= 0) {
-        sel_song = ents[list_move(cur, step)].song;
-        list_show(sel_ent());
+        set_cursor(list_move(cur, step));
+        list_show(cur_ent());
         list_vel = 0;
     }
-    if (in->pressed & BTN_TRIANGLE) list_set_view((list_view + 1) % N_VIEWS);
+    if (in->pressed & BTN_TRIANGLE) {        /* Edit on a playlist page, else the next tab */
+        if (on_playlist_page()) toggle_edit();
+        else {
+            int t;
+            for (t = 0; t < N_TABS && tab_view[t] != list_view; t++) ;
+            for (t = (t + 1) % N_TABS; tab_view[t] < 0; t = (t + 1) % N_TABS) ;
+            list_set_view(tab_view[t]);
+        }
+    }
     if (in->pressed & BTN_START) { skin = (skin + 1) % N_SKINS; settings_save(); }
-    if (in->pressed & BTN_SQUARE) { list_random(); return; }
+    if ((in->pressed & BTN_SQUARE) && n_rows > 0 && !edit_mode) { queue_start(0, 1); return; }
 
     if (ptr.pressed) {
         list_vel = 0;                        /* a finger on the list stops it */
@@ -1053,33 +1437,31 @@ static void list_update(const PlatInput *in, double dt)
     if (list_vel < -LIST_MAX_SPEED) list_vel = -LIST_MAX_SPEED;
 
     touch_row = -1;                          /* the row under a resting finger lights up */
-    if (ptr.down && press_zone == Z_LIST && ptr.moved < 8 && (e = ent_at(ptr.y)) >= 0 && ents[e].song >= 0)
-        touch_row = ents[e].song;
+    if (ptr.down && press_zone == Z_LIST && ptr.moved < 8 && selectable(e = ent_at(ptr.y)))
+        touch_row = e;
 
     if (ptr.released && ptr.moved < 8) {
         if (press_zone == Z_LIST) {
             e = ent_at(ptr.y);
-            if (e >= 0 && ents[e].song >= 0) {
-                sel_song = ents[e].song;
-                list_choose();
-                return;
-            }
+            if (selectable(e)) { list_activate(e); return; }
         } else if (press_zone == Z_NAV && ptr.x < 90) {
-            scene = SC_TITLE;
+            list_back();
             return;
         } else if (press_zone == Z_NAV && ptr.x > LW - 90) {
-            skin = (skin + 1) % N_SKINS;
-            settings_save();
+            if (on_playlist_page()) toggle_edit();
+            else { skin = (skin + 1) % N_SKINS; settings_save(); }
         } else if (press_zone == Z_TAB) {
-            int t = (int)(ptr.x / (LW / 4));
-            if (t == 3) { list_random(); return; }
-            if (t >= 0 && t < N_VIEWS) list_set_view(t);
+            int t = (int)(ptr.x / (LW / N_TABS));
+            if (t >= 0 && t < N_TABS) {
+                if (tab_view[t] < 0) { queue_start(1, 1); return; }
+                list_set_view(tab_view[t]);
+            }
         }
     }
-    if ((in->pressed & BTN_CROSS) && sel_ent() >= 0)
-        list_choose();
+    if (in->pressed & BTN_CROSS)
+        list_activate(cur_ent());
     else if (in->pressed & BTN_CIRCLE)
-        scene = SC_TITLE;
+        list_back();
 }
 
 /* ------------------------------------------------------- list drawing -- */
@@ -1140,6 +1522,14 @@ static void text_sh(float x, float y, float size, int align, float max_w, unsign
     text_fit(x, y, size, align, max_w, rgba, s, 1);
 }
 
+/* a tick mark from little squares */
+static void draw_check(float x, float y, unsigned c)
+{
+    int i;
+    for (i = 0; i < 6; i++) fill(x + i, y + 6 + i, 2.6f, 2.6f, c);
+    for (i = 0; i < 12; i++) fill(x + 5 + i, y + 11 - i, 2.6f, 2.6f, c);
+}
+
 static void nav_button(float x, float w, float arrow, const char *label)
 {
     const float y = 7, h = 30;
@@ -1159,27 +1549,35 @@ static void nav_button(float x, float w, float arrow, const char *label)
     text_sh(x + a + (w - a - b) / 2, y + 7, 14, 1, w - a - b - 6, tc, sc, sdy, label);
 }
 
-static void draw_nav(const char *title)
+static void draw_nav(void)
 {
+    const char *title = view_title[list_view], *back = list_page ? view_title[list_view] : "Back";
+    const char *right = on_playlist_page() ? (edit_mode ? "Done" : "Edit") : "Style";
+    float bw;
+    if (list_page && list_view == V_ARTISTS && page_song >= 0) title = songs[page_song].artist;
+    if (on_playlist_page()) title = pls[page_pl].name;
     if (skin == SKIN_SILVER) {
         shape(0, 0, LW, NAV_H, 0, 0, 0xeef0f2ffu, 0xb2bac1ffu);
         fill(0, 0, LW, 1, 0xfafbfcffu);
         fill(0, NAV_H - 1, LW, 1, 0x5e656affu);
-        text_sh(LW / 2, 10, 21, 1, LW - 180, 0x4a5156ffu, 0xffffffc0u, 1, title);
+        text_sh(LW / 2, 10, 21, 1, LW - 190, 0x4a5156ffu, 0xffffffc0u, 1, title);
     } else if (skin == SKIN_DARK) {
         shape(0, 0, LW, NAV_H, 0, 0, 0x2c2c30ffu, 0x161618ffu);
         fill(0, 0, LW, 1, 0x48484cffu);
         fill(0, NAV_H - 1, LW, 1, 0x000000ffu);
-        text_sh(LW / 2, 10, 21, 1, LW - 180, 0xf2f2f2ffu, 0x000000d0u, -1, title);
+        text_sh(LW / 2, 10, 21, 1, LW - 190, 0xf2f2f2ffu, 0x000000d0u, -1, title);
     } else {
         shape(0, 0, LW, NAV_H, 0, 0, 0xb4c0d1ffu, 0x6c82a1ffu);
         fill(0, 0, LW, 1, 0xd2dae4ffu);
         fill(0, NAV_H - 1, LW, 1, 0x2d3642ffu);
-        text_sh(LW / 2, 10, 21, 1, LW - 180, 0xffffffffu, 0x3a4a60d0u, -1, title);
+        text_sh(LW / 2, 10, 21, 1, LW - 190, 0xffffffffu, 0x3a4a60d0u, -1, title);
     }
-    if (skin != SKIN_BLUE) nav_button(6, 64, 11, "Back");
-    else nav_button(6, 60, 0, "Back");
-    nav_button(LW - 70, 64, skin == SKIN_BLUE ? -11 : 0, "Style");
+    bw = text_width(back, 14) + (skin != SKIN_BLUE ? 30 : 22);
+    if (bw < 60) bw = 60;
+    if (bw > 84) bw = 84;
+    if (skin != SKIN_BLUE || list_page) nav_button(6, bw, 11, back);
+    else nav_button(6, bw, 0, back);
+    nav_button(LW - 70, 64, skin == SKIN_BLUE && !on_playlist_page() ? -11 : 0, right);
 }
 
 static void draw_header(float y, char letter)
@@ -1203,6 +1601,8 @@ static void draw_header(float y, char letter)
     text_sh(11, y + 1, 18, 0, 0, 0xffffffffu, 0x55626cb0u, 1, b);
 }
 
+static void tab_icon(int t, float cx, float y, unsigned c);
+
 static void draw_art(float x, float y, int song)
 {
     static const unsigned pal[8] = {
@@ -1212,6 +1612,11 @@ static void draw_art(float x, float y, int song)
     unsigned h = 0, c;
     int i;
     char b[2] = { '?', 0 };
+    if (song < 0) {                          /* an empty playlist: a note on grey */
+        shape(x, y, ROW_H, ROW_H - 1, 0, 0, 0x8e8e93ffu, 0x6c6c70ffu);
+        tab_icon(1, x + ROW_H / 2, y + 9, 0xffffffd8u);
+        return;
+    }
     for (p = songs[song].artist; *p; p++) h = h * 31 + (unsigned char)*p;
     for (p = songs[song].artist; *p; p++)
         if (isalnum((unsigned char)*p)) { b[0] = (char)toupper((unsigned char)*p); break; }
@@ -1226,46 +1631,91 @@ static void draw_art(float x, float y, int song)
     text_fit(x + ROW_H / 2, y + 8, 26, 1, 0, 0xffffffd8u, b, 1);
 }
 
-static void draw_row(float y, int song, int lit, float right)
+/* the round red "remove" button of edit mode */
+static void draw_minus(float x, float y)
 {
-    const Song *s = &songs[song];
-    unsigned tc = 0x000000ffu, ac = 0x808080ffu, sc = 0x385487ffu;
-    const char *l1 = list_view == V_ARTISTS ? s->artist : s->title;
-    const char *l2 = list_view == V_ARTISTS ? s->title : s->artist;
-    long top = top_best(song);
-    float tx = skin != SKIN_BLUE ? ROW_H + 8 : 11, sw = 0;
-    char buf[24];
+    shape(x, y, 22, 22, 11, 0, 0xffffffffu, 0xffffffffu);
+    shape(x + 2, y + 2, 18, 18, 9, 0, 0xf2554affu, 0xc8251bffu);
+    fill(x + 6, y + 9.5f, 10, 3, 0xffffffffu);
+}
+
+static void draw_row(float y, int e, int lit, float right)
+{
+    const Entry *en = &ents[e];
+    unsigned tc = 0x000000ffu, ac = 0x808080ffu, sc = 0x385487ffu, chev = 0xa0a0a6ffu;
+    float tx = 11, sw = 0, x0 = 0;
+    char buf[48];
     if (skin == SKIN_DARK) {
-        tc = 0xf2f2f2ffu; ac = 0x8e8e93ffu; sc = DARK_ORANGE;
+        tc = 0xf2f2f2ffu; ac = 0x8e8e93ffu; sc = DARK_ORANGE; chev = 0x5a5a60ffu;
     }
     if (lit && skin == SKIN_DARK) {          /* dark text: white on orange is hard to read */
         shape(0, y, LW, ROW_H, 0, 0, 0xffa31affu, 0xf07800ffu);
-        tc = 0x140c00ffu; ac = 0x4a2a00ffu; sc = 0x140c00ffu;
+        tc = ac = sc = chev = 0x140c00ffu; ac = 0x4a2a00ffu;
     } else if (lit) {
         shape(0, y, LW, ROW_H, 0, 0, 0x058cf5ffu, 0x015ee6ffu);
-        tc = ac = sc = 0xffffffffu;
+        tc = ac = sc = chev = 0xffffffffu;
     } else {
         fill(0, y + ROW_H - 1, LW, 1, skin == SKIN_DARK ? 0x2c2c2fffu : 0xd9d9d9ffu);
     }
-    if (skin != SKIN_BLUE)
-        draw_art(0, y, song);
-    if (top > 0) {
-        snprintf(buf, sizeof buf, "%ld", top);
-        sw = text_width(buf, 14) + 8;
-        text(right, y + 15, 14, 2, 0, sc, buf);
+
+    if (en->kind == E_ACT) {
+        static const char *names[] = { "Play All", "Shuffle", "Add Playlist...", "Delete Playlist" };
+        unsigned ic = lit ? tc : skin == SKIN_DARK ? DARK_ORANGE : 0x2f6fd0ffu;
+        if (en->arg == A_DEL_PLIST) {
+            text_fit(LW / 2, y + 11, 19, 1, 0, lit ? tc : 0xd8261cffu, names[en->arg], 1);
+            return;
+        }
+        if (en->arg == A_PLAY_ALL) {
+            int i;
+            for (i = 0; i < 16; i++) fill(16, y + 14 + i, 14 * (1 - fabsf(i + 0.5f - 8) / 8), 1.15f, ic);
+        } else if (en->arg == A_SHUFFLE) {
+            tab_icon(4, 23, y + 8, ic);
+        } else {
+            fill(15, y + 20.5f, 16, 3, ic);
+            fill(21.5f, y + 14, 3, 16, ic);
+        }
+        text_fit(44, y + 11, 19, 0, right - 44, lit ? tc : ic, names[en->arg], 1);
+        return;
     }
-    text_fit(tx, y + 3, 20, 0, right - tx - sw, tc, l1, 1);
-    text_fit(tx, y + 24, 15, 0, right - tx - sw, ac, l2, 0);
+
+    if (en->kind == E_SONG && edit_mode) {
+        draw_minus(9, y + 11);
+        x0 = 40;
+    }
+    if (skin != SKIN_BLUE) {
+        int art = en->kind == E_PLIST ? (pls[en->arg].n ? pls[en->arg].song[0] : -1) : en->arg;
+        draw_art(x0, y, art);
+        tx = x0 + ROW_H + 8;
+    } else {
+        tx = x0 + 11;
+    }
+
+    if (en->kind == E_ARTIST || en->kind == E_PLIST) {
+        const char *name = en->kind == E_ARTIST ? songs[en->arg].artist : pls[en->arg].name;
+        snprintf(buf, sizeof buf, "%d %s", en->count, en->count == 1 ? "song" : "songs");
+        text_fit(tx, y + 3, 20, 0, right - tx - 22, tc, name, 1);
+        text_fit(tx, y + 24, 15, 0, right - tx - 22, ac, buf, 0);
+        text_fit(right - 2, y + 11, 20, 2, 0, chev, ">", 1);
+        return;
+    }
+
+    {                                        /* a song */
+        const Song *s = &songs[en->arg];
+        long top = top_best(en->arg);
+        if (top > 0 && !edit_mode) {
+            snprintf(buf, sizeof buf, "%ld", top);
+            sw = text_width(buf, 14) + 8;
+            text(right, y + 15, 14, 2, 0, sc, buf);
+        }
+        text_fit(tx, y + 3, 20, 0, right - tx - sw, tc, s->title, 1);
+        text_fit(tx, y + 24, 15, 0, right - tx - sw, ac, s->artist, 0);
+    }
 }
 
 static void draw_footer(float y)
 {
-    char buf[48];
-    if (list_view == V_SCORES && n_rows == 0)
-        snprintf(buf, sizeof buf, "No scores yet");
-    else
-        snprintf(buf, sizeof buf, "%d %s", n_rows, list_view == V_SCORES ? "Played" : n_rows == 1 ? "Song" : "Songs");
-    text_fit(LW / 2, y + 14, 18, 1, 0, skin == SKIN_DARK ? 0x6e6e73ffu : 0x8c8c8cffu, buf, 0);
+    float size = text_width(foot_text, 18) > LW - 24 ? 14 : 18;
+    text_fit(LW / 2, y + 14 + (18 - size) / 2, size, 1, LW - 20, skin == SKIN_DARK ? 0x6e6e73ffu : 0x8c8c8cffu, foot_text, 0);
 }
 
 static float lit_y0 = -1, lit_y1 = -1;       /* where the highlighted row is on screen */
@@ -1279,34 +1729,43 @@ static void draw_index(void)
               skin == SKIN_DARK ? 0xffffff30u : 0x00000038u, skin == SKIN_DARK ? 0xffffff30u : 0x00000038u);
     for (k = 0; k < 27; k++) {
         char b[2];
-        b[0] = k < 26 ? (char)('A' + k) : '#'; b[1] = 0;
         float ly = IDX_TOP + k * step + (step - 11) / 2, mid = ly + 5.5f;
         unsigned c = 0x6b7885ffu;
+        b[0] = k < 26 ? (char)('A' + k) : '#'; b[1] = 0;
         if (skin == SKIN_DARK)               /* orange, but dark over the orange highlight */
             c = mid >= lit_y0 && mid < lit_y1 ? 0x140c00ffu : DARK_ORANGE;
         text_fit(LW - IDX_W / 2, ly, 11, 1, 0, c, b, 1);
     }
 }
 
+/* tab icons, in tab order: playlists, a note, a person, score bars, a die */
 static void tab_icon(int t, float cx, float y, unsigned c)
 {
     switch (t) {
-    case 0:                                  /* a note */
+    case 0:                                  /* lines and a note */
+        fill(cx - 12, y + 4, 13, 3, c);
+        fill(cx - 12, y + 10, 13, 3, c);
+        fill(cx - 12, y + 16, 9, 3, c);
+        fill(cx + 6, y + 3, 2.5f, 17, c);
+        shape(cx + 6, y + 3, 7, 4, 0, 0, c, c);
+        shape(cx - 1, y + 16, 9.5f, 8, 4, 0, c, c);
+        break;
+    case 1:                                  /* a note */
         fill(cx + 1, y + 3, 2.5f, 18, c);
         shape(cx + 1, y + 3, 8, 4, 0, 0, c, c);
         fill(cx + 7, y + 3, 2, 8, c);
         shape(cx - 7, y + 16, 10.5f, 8, 4, 0, c, c);
         break;
-    case 1:                                  /* a person */
+    case 2:                                  /* a person */
         shape(cx - 5, y + 1, 10, 11, 5, 0, c, c);
         shape(cx - 10, y + 13, 20, 12, 6, 0, c, c);
         break;
-    case 2:                                  /* score bars */
+    case 3:                                  /* score bars */
         fill(cx - 10, y + 15, 5, 10, c);
         fill(cx - 2.5f, y + 8, 5, 17, c);
         fill(cx + 5, y + 2, 5, 23, c);
         break;
-    default:                                 /* a die: pick one at random */
+    default:                                 /* a die: shuffle */
         shape(cx - 10, y + 3, 20, 20, 4, 0, c, c);
         fill(cx - 6, y + 7, 3.5f, 3.5f, 0x222222ffu);
         fill(cx + 2.5f, y + 7, 3.5f, 3.5f, 0x222222ffu);
@@ -1319,47 +1778,82 @@ static void tab_icon(int t, float cx, float y, unsigned c)
 
 static void draw_tabs(void)
 {
-    static const char *lab[4] = { "Songs", "Artists", "Scores", "Shuffle" };
-    float y = LIST_BOT, tw = LW / 4;
+    float y = LIST_BOT, tw = LW / N_TABS;
     int t;
     shape(0, y, LW, TAB_H / 2, 0, 0, 0x3e3e3effu, 0x1e1e1effu);
     fill(0, y + TAB_H / 2, LW, TAB_H / 2, 0x0a0a0affu);
     fill(0, y, LW, 1, 0x111111ffu);
     fill(0, y + 1, LW, 1, 0x555555ffu);
-    for (t = 0; t < 4; t++) {
+    for (t = 0; t < N_TABS; t++) {
         float x = t * tw;
-        int sel = t == list_view;
+        int sel = tab_view[t] == list_view;
         unsigned ic = !sel ? 0x9a9a9affu : skin == SKIN_BLUE ? 0x3ea6ffffu : skin == SKIN_DARK ? DARK_ORANGE : 0xffffffffu;
-        if (sel) shape(x + 3, y + 3, tw - 6, TAB_H - 5, 3, 0, 0x5a5a5aa0u, 0x3a3a3aa0u);
+        if (sel) shape(x + 2, y + 3, tw - 4, TAB_H - 5, 3, 0, 0x5a5a5aa0u, 0x3a3a3aa0u);
         tab_icon(t, x + tw / 2, y + 4, ic);
-        text_fit(x + tw / 2, y + 32, 11, 1, 0, sel ? 0xffffffffu : 0x9a9a9affu, lab[t], 1);
+        text_fit(x + tw / 2, y + 32, 10, 1, tw - 2, sel ? 0xffffffffu : 0x9a9a9affu, tab_label[t], 1);
+    }
+}
+
+static void sheet_draw(void)
+{
+    float top, y;
+    int j, v;
+    if (!sheet.kind) return;
+    top = sheet_top();
+    v = sheet.n < SHEET_VIS ? sheet.n : SHEET_VIS;
+    fill(0, 0, LW, LH, 0x00000080u);
+    shape(0, top, LW, LH - top, 0, 0, 0x4a4a4cf2u, 0x1c1c1ef2u);
+    fill(0, top, LW, 1, 0x8a8a8affu);
+    y = top + 14;
+    if (sheet.kind == SH_ADD) {
+        text_fit(LW / 2, top + 9, 14, 1, LW - 60, 0xd2d2d2ffu, "Add to Playlist", 0);
+        if (sheet.first > 0) text_fit(LW - 24, top + 7, 14, 1, 0, 0xd2d2d2ffu, "^", 1);
+        if (sheet.first + SHEET_VIS < sheet.n) text_fit(LW - 40, top + 7, 14, 1, 0, 0xd2d2d2ffu, "more", 0);
+        y += 30;
+    }
+    for (j = 0; j < v; j++) {
+        int i = sheet.first + j;
+        unsigned top_c = 0x6e6e70ffu, bot_c = 0x3a3a3cffu;
+        if (sheet.style[i] == 1) { top_c = 0xef5a50ffu; bot_c = 0xb3241affu; }
+        if (sheet.style[i] == 2) { top_c = 0x2a2a2cffu; bot_c = 0x050505ffu; }
+        if (i == sheet.sel)
+            shape(14, y - 2, LW - 28, 48, 9, 0, skin == SKIN_DARK ? DARK_ORANGE : 0x3ea6ffffu, skin == SKIN_DARK ? DARK_ORANGE : 0x3ea6ffffu);
+        shape(16, y, LW - 32, 44, 8, 0, 0x101010ffu, 0x101010ffu);
+        shape(17, y + 1, LW - 34, 42, 7, 0, top_c, bot_c);
+        text_sh(LW / 2, y + 11, 18, 1, LW - 100, 0xffffffffu, 0x000000a0u, -1, sheet.label[i]);
+        if (sheet.kind == SH_ADD && sheet.arg[i] >= 0 && pl_has(sheet.arg[i], sel_song))
+            draw_check(LW - 48, y + 14, skin == SKIN_DARK ? DARK_ORANGE : 0xffffffffu);
+        y += SHEET_ROW;
     }
 }
 
 static void list_draw(void)
 {
-    int e, sticky = -1, nxt;
+    int e, sticky = -1, nxt, cur;
     float right;
     list_ensure();
     fill(0, 0, LW, LH, skin == SKIN_DARK ? 0x111113ffu : 0xffffffffu);
     if (!ents) return;
+    cur = cur_ent();
     right = LW - (sectioned() ? IDX_W + 4 : 10);
     lit_y0 = lit_y1 = -1;
     for (e = 0; e < n_ents; e++) {
         float y = LIST_TOP + ents[e].y - list_scroll;
-        if (ents[e].song == -1 && ents[e].y <= list_scroll) sticky = e;
+        if (ents[e].kind == E_HDR && ents[e].y <= list_scroll) sticky = e;
         if (y + ents[e].h < LIST_TOP || y > LIST_BOT) continue;
-        if (ents[e].song >= 0) {
-            int lit = ents[e].song == sel_song || ents[e].song == touch_row;
-            if (lit && ents[e].song == sel_song) { lit_y0 = y; lit_y1 = y + ROW_H; }
-            draw_row(y, ents[e].song, lit, right);
+        if (ents[e].kind == E_HDR) {
+            if (ents[e].y > list_scroll) draw_header(y, ents[e].hdr);   /* else the sticky copy covers it */
+        } else if (ents[e].kind == E_FOOT) {
+            draw_footer(y);
+        } else {
+            int lit = e == cur || e == touch_row;
+            if (e == cur) { lit_y0 = y; lit_y1 = y + ROW_H; }
+            draw_row(y, e, lit, right);
         }
-        else if (ents[e].song == -1) { if (ents[e].y > list_scroll) draw_header(y, ents[e].hdr); }   /* else the sticky copy covers it */
-        else draw_footer(y);
     }
     if (sticky >= 0) {                       /* the current section's header stays on top */
         float y = LIST_TOP;
-        for (nxt = sticky + 1; nxt < n_ents && ents[nxt].song != -1; nxt++) ;
+        for (nxt = sticky + 1; nxt < n_ents && ents[nxt].kind != E_HDR; nxt++) ;
         if (nxt < n_ents) {
             float ny = LIST_TOP + ents[nxt].y - list_scroll;
             if (ny < LIST_TOP + HDR_H) y = ny - HDR_H;
@@ -1367,8 +1861,9 @@ static void list_draw(void)
         draw_header(y, ents[sticky].hdr);
     }
     if (sectioned()) draw_index();
-    draw_nav(view_title[list_view]);
+    draw_nav();
     draw_tabs();
+    sheet_draw();
 }
 
 /* ------------------------------------------- song and results screens -- */
@@ -1526,11 +2021,11 @@ static float level_x(int k, int n)
 /* the previous or next song in the list's current order */
 static void np_step_song(int dir)
 {
-    int e = sel_ent(), f;
+    int e = cur_ent(), f;
     if (e < 0) return;
-    for (f = e + dir; f >= 0 && f < n_ents && ents[f].song < 0; f += dir) ;
+    for (f = e + dir; f >= 0 && f < n_ents && ents[f].kind != E_SONG; f += dir) ;
     if (f < 0 || f >= n_ents) return;
-    sel_song = ents[f].song;
+    set_cursor(f);
     sel_level = first_level(songs[sel_song].levels, sel_level);
     list_show(f);
     knob_x = -1;
@@ -1542,6 +2037,12 @@ static void level_update(const PlatInput *in)
     const Song *s = &songs[sel_song];
     int lv[5], n = song_levels(s, lv), k, cur = 0, dir = 0, go = 0;
     float w = LW / 3;
+    if (sheet_update(in))                    /* "Add to Playlist" is up */
+        return;
+    if (in->pressed & BTN_SQUARE) {
+        sheet_open_add();
+        return;
+    }
     for (k = 0; k < n; k++)
         if (lv[k] == sel_level) cur = k;
     if (in->pressed & (BTN_LEFT | BTN_UP)) dir = -1;
@@ -1565,8 +2066,12 @@ static void level_update(const PlatInput *in)
     if (!ptr.down) slider_held = 0;
 
     if (ptr.released && ptr.moved < 8) {
-        if (ptr.y < NP_BAR && (ptr.x < 60 || ptr.x > LW - 60)) {
+        if (ptr.y < NP_BAR && ptr.x < 60) {
             scene = SC_LIST;
+            return;
+        }
+        if (ptr.y < NP_BAR && ptr.x > LW - 60) {
+            sheet_open_add();
             return;
         }
         if (ptr.y >= NP_KEYS && ptr.y < NP_SLIDE) {
@@ -1620,28 +2125,46 @@ static void level_draw(void)
         int on = k == cur;
         text_fit(level_x(k, n), NP_SLIDE + 34, 11, 1, 0, on ? 0xffffffffu : 0x8a8a8affu, level_name[lv[k]], on);
     }
+    sheet_draw();
+}
+
+static void queue_next(void)
+{
+    if (queue_pos >= 0 && queue_pos + 1 < n_queue) {
+        queue_pos++;
+        queue_play();
+    } else {
+        queue_pos = -1;
+        scene = SC_LIST;
+    }
 }
 
 static void result_update(const PlatInput *in)
 {
     float w = LW / 3;
+    int queued = queue_pos >= 0;
     if (ptr.released && ptr.moved < 8) {
-        if (ptr.y < NP_BAR && (ptr.x < 60 || ptr.x > LW - 60)) { scene = SC_LIST; return; }
+        if (ptr.y < NP_BAR && (ptr.x < 60 || ptr.x > LW - 60)) { queue_pos = -1; scene = SC_LIST; return; }
         if (ptr.y >= NP_KEYS && ptr.y < NP_SLIDE) {
-            if (ptr.x < w) { np_step_song(-1); scene = SC_LEVEL; }
+            if (queued) {                    /* Play All / Shuffle: again, next, next */
+                if (ptr.x < w) { plat_sfx("click"); start_song(); }
+                else queue_next();
+            } else if (ptr.x < w) { np_step_song(-1); scene = SC_LEVEL; }
             else if (ptr.x < 2 * w) { plat_sfx("click"); start_song(); }
             else { np_step_song(1); scene = SC_LEVEL; }
             return;
         }
     }
     if (in->pressed & BTN_TRIANGLE) { plat_sfx("click"); start_song(); }
-    else if (in->pressed & (BTN_CROSS | BTN_CIRCLE)) scene = SC_LIST;
+    else if (queued && (in->pressed & BTN_CROSS)) queue_next();
+    else if (in->pressed & (BTN_CROSS | BTN_CIRCLE)) { queue_pos = -1; scene = SC_LIST; }
+    else if (queued && queue_pos + 1 < n_queue && now_t >= next_at) queue_next();
 }
 
 static void result_draw(void)
 {
     const Song *s = &songs[sel_song];
-    char buf[64], num[24];
+    char buf[128], num[24];
     int pct = n_judged ? (int)(100.0 * n_hit / n_judged + 0.5) : 0;
     float y = NP_BAR + 158;
     fill(0, 0, LW, LH, 0x000000ffu);
@@ -1666,7 +2189,12 @@ static void result_draw(void)
     text_fit(LW / 2, y + 80, 15, 1, LW - 20, 0xc8c8c8ffu, buf, 0);
     snprintf(buf, sizeof buf, "Best streak: %d", best_streak);
     text_fit(LW / 2, y + 104, 15, 1, LW - 20, 0xc8c8c8ffu, buf, 0);
-    np_bar(s, level_name[sel_level]);
+    if (queue_pos >= 0) {
+        snprintf(buf, sizeof buf, "%s  -  %d of %d", level_name[sel_level], queue_pos + 1, n_queue);
+        np_bar(s, buf);
+    } else {
+        np_bar(s, level_name[sel_level]);
+    }
     np_keys(1);
 
     /* the share of notes hit, as a filled track */
@@ -1675,7 +2203,15 @@ static void result_draw(void)
     text(NP_X0 - 6, NP_SLIDE + 14, 12, 2, 0, 0xa8a8a8ffu, buf);
     snprintf(buf, sizeof buf, "%d%%", pct);
     text(NP_X1 + 6, NP_SLIDE + 14, 12, 0, 0, 0xa8a8a8ffu, buf);
-    text_fit(LW / 2, NP_SLIDE + 34, 11, 1, 0, 0x8a8a8affu, "X: song list    Triangle: play again", 0);
+    if (queue_pos >= 0 && queue_pos + 1 < n_queue) {
+        int secs = (int)ceil(next_at - now_t);
+        snprintf(buf, sizeof buf, "Up next in %d:  %s", secs < 0 ? 0 : secs, songs[queue[queue_pos + 1]].title);
+        text_fit(LW / 2, NP_SLIDE + 34, 11, 1, LW - 20, 0xd0d0d0ffu, buf, 1);
+    } else if (queue_pos >= 0) {
+        text_fit(LW / 2, NP_SLIDE + 34, 11, 1, 0, 0x8a8a8affu, "That was the last song   X: song list", 0);
+    } else {
+        text_fit(LW / 2, NP_SLIDE + 34, 11, 1, 0, 0x8a8a8affu, "X: song list    Triangle: play again", 0);
+    }
 }
 
 /* --------------------------------------------------------- entry points -- */
@@ -1683,14 +2219,33 @@ static void result_draw(void)
 /* settings.txt: the screen layout, then one "best" line per song+difficulty */
 static void settings_load(void)
 {
-    char line[256], num[8];
+    static char line[4096];
+    char num[8];
     int level, streak, hit, judged, song;
     long sc;
     FILE *fp = fopen(plat_save_file(), "r");
     if (!fp)
         return;
     while (fgets(line, sizeof line, fp)) {
-        if (sscanf(line, "tate %d", &level) == 1) {
+        if (!strncmp(line, "playlist ", 9) && n_pls < MAX_PL) {
+            /* playlist <name><TAB><song number>,<song number>,... */
+            char *tab = strchr(line + 9, '\t'), *p;
+            Playlist *pl = &pls[n_pls];
+            if (!tab) continue;
+            *tab = 0;
+            snprintf(pl->name, sizeof pl->name, "%.31s", line + 9);
+            pl->n = 0;
+            n_pls++;
+            for (p = tab + 1; *p && *p != '\n'; ) {
+                char n3[8];
+                size_t len = strcspn(p, ",\r\n");
+                snprintf(n3, sizeof n3, "%.*s", (int)(len < 7 ? len : 7), p);
+                if ((song = song_by_num(n3)) >= 0)  /* a song no longer present is dropped */
+                    pl_add(n_pls - 1, song);
+                p += len;
+                if (*p == ',') p++;
+            }
+        } else if (sscanf(line, "tate %d", &level) == 1) {
             tate = level != 0;
         } else if (sscanf(line, "skin %d", &level) == 1) {
             skin = level >= 0 && level < N_SKINS ? level : 0;
@@ -1715,6 +2270,12 @@ static void settings_save(void)
         return;
     }
     fprintf(fp, "tate %d\nskin %d\n", tate, skin);
+    for (i = 0; i < n_pls; i++) {
+        fprintf(fp, "playlist %s\t", pls[i].name);
+        for (l = 0; l < pls[i].n; l++)
+            fprintf(fp, "%s%s", l ? "," : "", songs[pls[i].song[l]].num);
+        fprintf(fp, "\n");
+    }
     for (i = 0; i < n_songs; i++)
         for (l = 0; l < 5; l++) {
             const Best *b = best_of(i, l);
@@ -1736,10 +2297,16 @@ int game_init(int sw, int sh)
     bests = calloc((size_t)n_songs * 5 + 1, sizeof *bests);
     if (!bests)
         return -1;
+    n_pls = 0;
     settings_load();
     view_setup();                            /* the layout may have come from the file */
     sel_song = -1;                           /* the list starts on its first row */
+    cur_kind = E_SONG;
+    cur_arg = -1;
     list_view = V_SONGS;
+    list_page = edit_mode = 0;
+    queue_pos = -1;
+    sheet.kind = SH_NONE;
     list_scroll = 0;
     list_dirty = 1;
     scene = SC_TITLE;
@@ -1756,8 +2323,8 @@ void game_shutdown(void)
     free(art_have);
     art_have = NULL;
     art_tiles = 0;
-    free(songs); free(notes); free(bests); free(ents); free(ord);
-    songs = NULL; notes = NULL; bests = NULL; ents = NULL; ord = NULL;
+    free(songs); free(notes); free(bests); free(ents); free(ord); free(queue);
+    songs = NULL; notes = NULL; bests = NULL; ents = NULL; ord = NULL; queue = NULL;
     n_songs = n_notes = n_ents = n_rows = 0;
     built_view = -1;
 }
@@ -1830,9 +2397,13 @@ void game_debug(char *buf, int n)
     if (songs) {                             /* the cursor's place in the list, and its song number */
         list_ensure();
         for (e = 0; e < n_ents; e++)
-            if (ents[e].song >= 0) { if (ents[e].song == sel_song) { row = k; break; } k++; }
+            if (ents[e].kind == E_SONG) {
+                if (cur_kind == E_SONG && ents[e].arg == cur_arg) { row = k; break; }
+                k++;
+            }
     }
-    snprintf(buf, (size_t)n, "row=%d num=%s view=%d skin=%d scene=%d song=%d level=%d t=%.2f notes=%d score=%ld streak=%d best=%d mult=%d hit=%d judged=%d revenge=%d paused=%d",
-             row, sel_song >= 0 && sel_song < n_songs ? songs[sel_song].num : "-", list_view, skin,
+    snprintf(buf, (size_t)n, "row=%d num=%s view=%d page=%d edit=%d queue=%d/%d sheet=%d pls=%d pl0=%d cur=%d skin=%d scene=%d song=%d level=%d t=%.2f notes=%d score=%ld streak=%d best=%d mult=%d hit=%d judged=%d revenge=%d paused=%d",
+             row, sel_song >= 0 && sel_song < n_songs ? songs[sel_song].num : "-", list_view, list_page, edit_mode,
+             queue_pos, n_queue, sheet.kind, n_pls, n_pls ? pls[0].n : -1, cur_kind, skin,
              scene, sel_song, sel_level, song_t, n_notes, score, streak, best_streak, mult, n_hit, n_judged, revenge, paused);
 }

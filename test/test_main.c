@@ -257,7 +257,8 @@ int main(int argc, char **argv)
         press(BTN_CIRCLE); run(0.2);
         press(BTN_TRIANGLE); press(BTN_TRIANGLE); run(0.1); snap("10e_scores_tab");
         check("scores tab lists the played songs", field("view=") == 2 && field("row=") == 0);
-        press(BTN_TRIANGLE); run(0.1);
+        press(BTN_TRIANGLE); press(BTN_TRIANGLE); run(0.1);   /* on through Playlists to Songs */
+        check("tabs wrap around", field("view=") == 0);
         press(BTN_START); run(0.1); snap("10f_blue_style");
         check("style switch", field("skin=") == 1);
         press(BTN_START); run(0.1); snap("10g_dark_style");
@@ -282,6 +283,69 @@ int main(int argc, char **argv)
     /* scroll to the end of the list */
     for (i = 0; i < 400; i++) press(BTN_R);
     snap("10_list_end"); say("list end");
+
+    /* artists: an artist's page, where Play All plays their songs in turn */
+    press(BTN_TRIANGLE); run(0.1);
+    check("artists tab", field("view=") == 1);
+    snap("12_artists"); say("artists");
+    press(BTN_CROSS); run(0.2); snap("12b_artist_page"); say("artist page");
+    check("artist page", field("page=") == 1);
+    press(BTN_CROSS); run(0.1);                       /* Play All */
+    check("play all starts a song", field("scene=") == 3 && field("queue=") == 0);
+    in.held = BTN_START; frame(); in.held = 0; frame();
+    press(BTN_CIRCLE); run(0.1);
+    check("quitting a song ends play all", field("scene=") == 1 && field("queue=") == -1);
+    press(BTN_CIRCLE); run(0.1);
+    check("back to the artists", field("page=") == 0 && field("view=") == 1);
+
+    /* play all to the end: results move on to the next song by themselves */
+    press(BTN_CROSS); run(0.1); press(BTN_CROSS); run(0.1);
+    {
+        long first = field("num=");
+        { int k; for (k = 0; k < 100000 && field("scene=") != 4; k++) frame(); }
+        run(0.5); snap("12c_queue_results"); say("queue results");
+        check("results while playing all", field("scene=") == 4 && field("queue=") == 0);
+        run(9);
+        check("next song started by itself", field("scene=") == 3 && field("queue=") == 1 && field("num=") != first);
+        in.held = BTN_START; frame(); in.held = 0; frame();
+        press(BTN_CIRCLE); run(0.1);
+        press(BTN_CIRCLE); run(0.1);
+    }
+
+    /* playlists: make two, put a song on them from its song screen, keep them */
+    press(BTN_TRIANGLE); press(BTN_TRIANGLE); run(0.1);
+    check("playlists tab", field("view=") == 3);
+    press(BTN_CROSS); run(0.2); snap("13_empty_playlist");
+    check("new playlist opened", field("pls=") == 1 && field("page=") == 1);
+    press(BTN_CIRCLE); run(0.1); snap("13b_playlists");
+    press(BTN_TRIANGLE); run(0.1);
+    press(BTN_CROSS); run(0.2);
+    press(BTN_SQUARE); run(0.1); snap("14_add_sheet");
+    check("add sheet up", field("sheet=") == 1);
+    press(BTN_CROSS); run(0.1);                       /* tick Playlist 1 */
+    press(BTN_DOWN); press(BTN_CROSS); run(0.1);      /* New Playlist, with this song on it */
+    snap("14b_add_sheet_ticked"); say("ticked");
+    check("song on both playlists", field("pl0=") == 1 && field("pls=") == 2);
+    press(BTN_CIRCLE); run(0.1);
+    check("sheet closed", field("sheet=") == 0 && field("scene=") == 2);
+    press(BTN_CIRCLE); run(0.1);
+    game_shutdown();
+    if (game_init(w, h) != 0) { printf("re-init failed\n"); return 1; }
+    check("playlists kept after a restart", field("pls=") == 2 && field("pl0=") == 1);
+
+    /* a playlist's page, and taking the song off it in edit mode */
+    run(0.2); tap(160, 300); run(0.2);
+    for (i = 0; i < 3; i++) press(BTN_TRIANGLE);      /* Songs, Artists, Scores, Playlists */
+    press(BTN_DOWN); press(BTN_CROSS); run(0.2); snap("15_playlist_page"); say("playlist page");
+    check("playlist page", field("page=") == 1);
+    press(BTN_TRIANGLE); run(0.1); snap("15b_edit");
+    check("edit mode", field("edit=") == 1);
+    press(BTN_CROSS); run(0.1);
+    check("song taken off", field("pl0=") == 0);
+    press(BTN_CROSS); run(0.1); snap("15c_delete_sheet");
+    check("delete asks first", field("sheet=") == 2);
+    press(BTN_CROSS); run(0.1);
+    check("playlist deleted", field("pls=") == 1 && field("page=") == 0);
 
     game_shutdown();
     printf("textures alive after shutdown: %d\n", soft_live_tex);
