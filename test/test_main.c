@@ -260,7 +260,10 @@ int main(int argc, char **argv)
         press(BTN_TRIANGLE); run(0.1);
         press(BTN_START); run(0.1); snap("10f_blue_style");
         check("style switch", field("skin=") == 1);
+        press(BTN_START); run(0.1); snap("10g_dark_style");
+        check("dark style", field("skin=") == 2);
         press(BTN_START); run(0.1);
+        check("styles wrap around", field("skin=") == 0);
         press(BTN_CROSS); run(0.2);
         press(BTN_CIRCLE); run(0.2);
     }

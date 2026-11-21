@@ -705,9 +705,10 @@ static void play_draw(void)
 
 /* The song list looks like a classic phone music library: a title bar,
  * alphabetical sections with a header that sticks to the top, an A-Z index
- * down the right, rows of title and artist, and a tab bar.  Two styles:
- * SKIN_SILVER (light grey bars, a cover tile on each row) and SKIN_BLUE
- * (blue-grey bars, see-through section headers, text-only rows).  Everything
+ * down the right, rows of title and artist, and a tab bar.  Three styles:
+ * SKIN_SILVER (light grey bars, a cover tile on each row), SKIN_BLUE
+ * (blue-grey bars, see-through section headers, text-only rows) and
+ * SKIN_DARK (near-black, cover tiles, orange highlight and accents).  Everything
  * is drawn with plain fills, so no extra artwork is needed. */
 
 #define NAV_H    44.0f
@@ -719,7 +720,8 @@ static void play_draw(void)
 #define LIST_TOP NAV_H
 #define LIST_BOT (LH - TAB_H)
 
-enum { SKIN_SILVER, SKIN_BLUE, N_SKINS };
+enum { SKIN_SILVER, SKIN_BLUE, SKIN_DARK, N_SKINS };
+#define DARK_ORANGE 0xff9500ffu                /* dark style: accents and the highlight */
 static int skin;                             /* saved in the settings file */
 
 enum { V_SONGS, V_ARTISTS, V_SCORES, N_VIEWS };
@@ -1108,6 +1110,8 @@ static void nav_button(float x, float w, float arrow, const char *label)
     float a = arrow > 0 ? arrow : 0, b = arrow < 0 ? -arrow : 0, sdy;
     if (skin == SKIN_SILVER) {
         edge = 0x6b7378ffu; top = 0xdde2e6ffu; bot = 0x9ca6aeffu; tc = 0x4a5156ffu; sc = 0xffffffb0u; sdy = 1;
+    } else if (skin == SKIN_DARK) {
+        edge = 0x000000ffu; top = 0x3a3a3effu; bot = 0x222225ffu; tc = DARK_ORANGE; sc = 0x000000c0u; sdy = -1;
     } else if (arrow < 0) {                  /* the black "now playing" style */
         edge = 0x0a0a0affu; top = 0x4a4a4affu; bot = 0x0c0c0cffu; tc = 0xffffffffu; sc = 0x000000c0u; sdy = -1;
     } else {
@@ -1125,13 +1129,18 @@ static void draw_nav(const char *title)
         fill(0, 0, LW, 1, 0xfafbfcffu);
         fill(0, NAV_H - 1, LW, 1, 0x5e656affu);
         text_sh(LW / 2, 10, 21, 1, LW - 180, 0x4a5156ffu, 0xffffffc0u, 1, title);
+    } else if (skin == SKIN_DARK) {
+        shape(0, 0, LW, NAV_H, 0, 0, 0x2c2c30ffu, 0x161618ffu);
+        fill(0, 0, LW, 1, 0x48484cffu);
+        fill(0, NAV_H - 1, LW, 1, 0x000000ffu);
+        text_sh(LW / 2, 10, 21, 1, LW - 180, 0xf2f2f2ffu, 0x000000d0u, -1, title);
     } else {
         shape(0, 0, LW, NAV_H, 0, 0, 0xb4c0d1ffu, 0x6c82a1ffu);
         fill(0, 0, LW, 1, 0xd2dae4ffu);
         fill(0, NAV_H - 1, LW, 1, 0x2d3642ffu);
         text_sh(LW / 2, 10, 21, 1, LW - 180, 0xffffffffu, 0x3a4a60d0u, -1, title);
     }
-    if (skin == SKIN_SILVER) nav_button(6, 64, 11, "Back");
+    if (skin != SKIN_BLUE) nav_button(6, 64, 11, "Back");
     else nav_button(6, 60, 0, "Back");
     nav_button(LW - 70, 64, skin == SKIN_BLUE ? -11 : 0, "Style");
 }
@@ -1144,6 +1153,12 @@ static void draw_header(float y, char letter)
         shape(0, y, LW, HDR_H, 0, 0, 0xb7c1c8ffu, 0xa2aeb7ffu);
         fill(0, y, LW, 1, 0x9aa6afffu);
         fill(0, y + HDR_H - 1, LW, 1, 0x8f9ba4ffu);
+    } else if (skin == SKIN_DARK) {
+        shape(0, y, LW, HDR_H, 0, 0, 0x2a2a2dffu, 0x1f1f22ffu);
+        fill(0, y, LW, 1, 0x3a3a3effu);
+        fill(0, y + HDR_H - 1, LW, 1, 0x0c0c0effu);
+        text_sh(11, y + 1, 18, 0, 0, DARK_ORANGE, 0x000000c0u, 1, b);
+        return;
     } else {                                 /* see-through, the rows show behind it */
         shape(0, y, LW, HDR_H, 0, 0, 0x9aa6b1d8u, 0x8593a0d8u);
         fill(0, y + HDR_H - 1, LW, 1, 0x7a8794e0u);
@@ -1174,15 +1189,21 @@ static void draw_row(float y, int song, int lit, float right)
     const char *l1 = list_view == V_ARTISTS ? s->artist : s->title;
     const char *l2 = list_view == V_ARTISTS ? s->title : s->artist;
     long top = top_best(song);
-    float tx = skin == SKIN_SILVER ? ROW_H + 8 : 11, sw = 0;
+    float tx = skin != SKIN_BLUE ? ROW_H + 8 : 11, sw = 0;
     char buf[24];
-    if (lit) {
+    if (skin == SKIN_DARK) {
+        tc = 0xf2f2f2ffu; ac = 0x8e8e93ffu; sc = DARK_ORANGE;
+    }
+    if (lit && skin == SKIN_DARK) {          /* dark text: white on orange is hard to read */
+        shape(0, y, LW, ROW_H, 0, 0, 0xffa31affu, 0xf07800ffu);
+        tc = 0x140c00ffu; ac = 0x4a2a00ffu; sc = 0x140c00ffu;
+    } else if (lit) {
         shape(0, y, LW, ROW_H, 0, 0, 0x058cf5ffu, 0x015ee6ffu);
         tc = ac = sc = 0xffffffffu;
     } else {
-        fill(0, y + ROW_H - 1, LW, 1, 0xd9d9d9ffu);
+        fill(0, y + ROW_H - 1, LW, 1, skin == SKIN_DARK ? 0x2c2c2fffu : 0xd9d9d9ffu);
     }
-    if (skin == SKIN_SILVER)
+    if (skin != SKIN_BLUE)
         draw_art(0, y, song);
     if (top > 0) {
         snprintf(buf, sizeof buf, "%ld", top);
@@ -1200,19 +1221,26 @@ static void draw_footer(float y)
         snprintf(buf, sizeof buf, "No scores yet");
     else
         snprintf(buf, sizeof buf, "%d %s", n_rows, list_view == V_SCORES ? "Played" : n_rows == 1 ? "Song" : "Songs");
-    text_fit(LW / 2, y + 14, 18, 1, 0, 0x8c8c8cffu, buf, 0);
+    text_fit(LW / 2, y + 14, 18, 1, 0, skin == SKIN_DARK ? 0x6e6e73ffu : 0x8c8c8cffu, buf, 0);
 }
+
+static float lit_y0 = -1, lit_y1 = -1;       /* where the highlighted row is on screen */
 
 static void draw_index(void)
 {
     float step = (IDX_BOT - IDX_TOP) / 27;
     int k;
     if (idx_active)
-        shape(LW - IDX_W + 1, LIST_TOP + 2, IDX_W - 3, IDX_BOT - IDX_TOP + 8, (IDX_W - 3) / 2, 0, 0x00000038u, 0x00000038u);
+        shape(LW - IDX_W + 1, LIST_TOP + 2, IDX_W - 3, IDX_BOT - IDX_TOP + 8, (IDX_W - 3) / 2, 0,
+              skin == SKIN_DARK ? 0xffffff30u : 0x00000038u, skin == SKIN_DARK ? 0xffffff30u : 0x00000038u);
     for (k = 0; k < 27; k++) {
         char b[2];
         b[0] = k < 26 ? (char)('A' + k) : '#'; b[1] = 0;
-        text_fit(LW - IDX_W / 2, IDX_TOP + k * step + (step - 11) / 2, 11, 1, 0, 0x6b7885ffu, b, 1);
+        float ly = IDX_TOP + k * step + (step - 11) / 2, mid = ly + 5.5f;
+        unsigned c = 0x6b7885ffu;
+        if (skin == SKIN_DARK)               /* orange, but dark over the orange highlight */
+            c = mid >= lit_y0 && mid < lit_y1 ? 0x140c00ffu : DARK_ORANGE;
+        text_fit(LW - IDX_W / 2, ly, 11, 1, 0, c, b, 1);
     }
 }
 
@@ -1257,7 +1285,7 @@ static void draw_tabs(void)
     for (t = 0; t < 4; t++) {
         float x = t * tw;
         int sel = t == list_view;
-        unsigned ic = !sel ? 0x9a9a9affu : skin == SKIN_BLUE ? 0x3ea6ffffu : 0xffffffffu;
+        unsigned ic = !sel ? 0x9a9a9affu : skin == SKIN_BLUE ? 0x3ea6ffffu : skin == SKIN_DARK ? DARK_ORANGE : 0xffffffffu;
         if (sel) shape(x + 3, y + 3, tw - 6, TAB_H - 5, 3, 0, 0x5a5a5aa0u, 0x3a3a3aa0u);
         tab_icon(t, x + tw / 2, y + 4, ic);
         text_fit(x + tw / 2, y + 32, 11, 1, 0, sel ? 0xffffffffu : 0x9a9a9affu, lab[t], 1);
@@ -1269,14 +1297,19 @@ static void list_draw(void)
     int e, sticky = -1, nxt;
     float right;
     list_ensure();
-    fill(0, 0, LW, LH, 0xffffffffu);
+    fill(0, 0, LW, LH, skin == SKIN_DARK ? 0x111113ffu : 0xffffffffu);
     if (!ents) return;
     right = LW - (sectioned() ? IDX_W + 4 : 10);
+    lit_y0 = lit_y1 = -1;
     for (e = 0; e < n_ents; e++) {
         float y = LIST_TOP + ents[e].y - list_scroll;
         if (ents[e].song == -1 && ents[e].y <= list_scroll) sticky = e;
         if (y + ents[e].h < LIST_TOP || y > LIST_BOT) continue;
-        if (ents[e].song >= 0) draw_row(y, ents[e].song, ents[e].song == sel_song || ents[e].song == touch_row, right);
+        if (ents[e].song >= 0) {
+            int lit = ents[e].song == sel_song || ents[e].song == touch_row;
+            if (lit && ents[e].song == sel_song) { lit_y0 = y; lit_y1 = y + ROW_H; }
+            draw_row(y, ents[e].song, lit, right);
+        }
         else if (ents[e].song == -1) { if (ents[e].y > list_scroll) draw_header(y, ents[e].hdr); }   /* else the sticky copy covers it */
         else draw_footer(y);
     }
