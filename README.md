@@ -234,9 +234,15 @@ Updating the program later is just a new VPK; the songs stay where they are.
 
 **Song covers in an older `app_data/`.** Covers were added after the first
 version of the converter. If your song list shows lettered squares instead of
-cover art, run the converter again on the same folder (songs already converted
-are kept, so it is quick) and copy the new `app_data/gfx/art.png` to
-`ux0:data/ttrvita/app_data/gfx/` on the Vita.
+cover art, make just the covers (this needs only Python and Pillow, not ffmpeg
+or Lua, and works even where the songs were converted on another computer):
+
+```sh
+python3 tools/prep_assets.py "/path/to/Tap Tap Revenge 3.ipa" app_data --art-only
+```
+
+and copy the new `app_data/gfx/art.png` to `ux0:data/ttrvita/app_data/gfx/` on
+the Vita. Use the same `.ipa` the songs came from: the covers go by song number.
 
 ## Options
 
@@ -244,6 +250,7 @@ are kept, so it is quick) and copy the new `app_data/gfx/art.png` to
 python3 tools/prep_assets.py game.ipa app_data --limit 20   # only the first 20 songs
 python3 tools/prep_assets.py game.ipa app_data --jobs 4     # how many songs to convert at once
 python3 tools/prep_assets.py game.ipa app_data --no-audio   # charts and themes only, no songs
+python3 tools/prep_assets.py game.ipa app_data --art-only   # only the song covers (gfx/art.png)
 cmake -S . -B build -DEMBED_DATA=ON                         # songs inside the VPK (very slow to install)
 ```
 

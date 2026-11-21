@@ -182,6 +182,35 @@ def build_themes(z, app, names, wanted, out, lua):
     return ok
 
 
+def find_tracks(z, names, limit=0):
+    """The game's songs, numbered 1.. in artist / title order: the numbers the
+    charts, audio, covers and saved scores all go by."""
+    dirs = sorted({n.split('.track/')[0] + '.track/' for n in names if '.track/' in n and '/Tracks/' in n})
+    tracks = []
+    for d in dirs:
+        audio = next((d + f for f in ('audio.m4c', 'audio.m4a', 'audio.mp3') if d + f in names), None)
+        if d + 'taptrack.ttr2_track' not in names or not audio:
+            continue
+        try:
+            info = plistlib.loads(z.read(d + 'info.plist'))
+            if 'data' in info:
+                info = plistlib.loads(info['data'])
+        except Exception:
+            info = {}
+        lt = info.get('levelThemes') if isinstance(info.get('levelThemes'), dict) else {}
+        tracks.append({'dir': d, 'audio': audio, 'theme': str(info.get('themeName') or DEFAULT_THEME),
+                       'level_themes': {str(k): str(v) for k, v in lt.items()},
+                       'title': ascii_text(info.get('kTTRDownloadableItemTitleKey')),
+                       'artist': ascii_text(info.get('kTTRDownloadableItemSubtitleKey'))})
+    tracks.sort(key=lambda t: (t['artist'].lower(), t['title'].lower(), t['dir']))
+    if limit:
+        tracks = tracks[:limit]
+    for i, t in enumerate(tracks):
+        t['num'] = i + 1
+    print('%d tracks found' % len(tracks)); sys.stdout.flush()
+    return tracks
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('ipa')
@@ -190,7 +219,15 @@ def main():
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
     ap.add_argument('--no-audio', action='store_true')
     ap.add_argument('--max-seconds', type=float, default=0, help='stop starting new songs after this long')
+    ap.add_argument('--art-only', action='store_true',
+                    help='only write gfx/art.png, the song covers (for songs converted earlier)')
     a = ap.parse_args()
+    if a.art_only:                           # needs only Pillow: no ffmpeg, no Lua
+        os.makedirs(os.path.join(a.out, 'gfx'), exist_ok=True)
+        z = zipfile.ZipFile(a.ipa)
+        build_art(z, find_tracks(z, z.namelist(), a.limit), a.out)
+        print('wrote %s' % os.path.join(a.out, 'gfx', 'art.png'))
+        return
     import time
     t_start = time.time()
 
@@ -240,29 +277,7 @@ def main():
                                     '-ar', '44100', '-c:a', 'pcm_s16le', dst], stdin=subprocess.DEVNULL)
 
     # ---- tracks ----
-    dirs = sorted({n.split('.track/')[0] + '.track/' for n in names if '.track/' in n and '/Tracks/' in n})
-    tracks = []
-    for d in dirs:
-        audio = next((d + f for f in ('audio.m4c', 'audio.m4a', 'audio.mp3') if d + f in names), None)
-        if d + 'taptrack.ttr2_track' not in names or not audio:
-            continue
-        try:
-            info = plistlib.loads(z.read(d + 'info.plist'))
-            if 'data' in info:
-                info = plistlib.loads(info['data'])
-        except Exception:
-            info = {}
-        lt = info.get('levelThemes') if isinstance(info.get('levelThemes'), dict) else {}
-        tracks.append({'dir': d, 'audio': audio, 'theme': str(info.get('themeName') or DEFAULT_THEME),
-                       'level_themes': {str(k): str(v) for k, v in lt.items()},
-                       'title': ascii_text(info.get('kTTRDownloadableItemTitleKey')),
-                       'artist': ascii_text(info.get('kTTRDownloadableItemSubtitleKey'))})
-    tracks.sort(key=lambda t: (t['artist'].lower(), t['title'].lower(), t['dir']))
-    if a.limit:
-        tracks = tracks[:a.limit]
-    for i, t in enumerate(tracks):
-        t['num'] = i + 1
-    print('%d tracks found' % len(tracks)); sys.stdout.flush()
+    tracks = find_tracks(z, names, a.limit)
 
     build_art(z, tracks, out)
 
