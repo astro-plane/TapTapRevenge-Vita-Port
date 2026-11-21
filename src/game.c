@@ -8,6 +8,7 @@
  * charts), and each song's scenery, lane curves, fall time and reactions
  * (its theme, see theme.c).  The scoring numbers below are this project's own.
  */
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -193,7 +194,23 @@ static void draw_bars(void)
 
 /* --------------------------------------------------------------- songs -- */
 
-typedef struct { char num[8]; char title[64]; char artist[48]; float length; int levels; char theme[5][28]; } Song;
+typedef struct {
+    char num[8]; char title[64]; char artist[48]; float length; int levels; char theme[5][28];
+    char tkey[64], akey[48];                 /* sort keys: lower case, without a leading "The " */
+    char tletter, aletter;                   /* their list section: 'A'..'Z', or '#' */
+} Song;
+
+static void sort_key(const char *s, char *out, size_t n, char *letter)
+{
+    size_t i = 0;
+    if (tolower((unsigned char)s[0]) == 't' && tolower((unsigned char)s[1]) == 'h' &&
+        tolower((unsigned char)s[2]) == 'e' && s[3] == ' ' && s[4])
+        s += 4;
+    for (; *s && i + 1 < n; s++)
+        out[i++] = (char)tolower((unsigned char)*s);
+    out[i] = 0;
+    *letter = out[0] >= 'a' && out[0] <= 'z' ? (char)(out[0] - 'a' + 'A') : '#';
+}
 static Song *songs;
 static int n_songs;
 
@@ -254,6 +271,8 @@ static int songs_load(void)
         snprintf(s->num, sizeof s->num, "%s", f[0]);
         snprintf(s->title, sizeof s->title, "%s", f[1]);
         snprintf(s->artist, sizeof s->artist, "%s", f[2]);
+        sort_key(s->title, s->tkey, sizeof s->tkey, &s->tletter);
+        sort_key(s->artist, s->akey, sizeof s->akey, &s->aletter);
         s->length = (float)atof(f[3]);
         for (p = f[4]; *p; p++)
             if (*p >= '0' && *p <= '4')
@@ -429,6 +448,7 @@ static void start_song(void)
 
 static void settings_save(void);
 
+static int list_dirty;                       /* the song list must be rebuilt (menus, below) */
 static Best prev_best;                       /* what it was before this run */
 static int new_best;
 
@@ -445,6 +465,7 @@ static void record_run(void)
         b->hit = n_hit;
         b->judged = n_judged;
         settings_save();                     /* write now: the Vita may be switched off */
+        list_dirty = 1;                      /* scores and their order changed */
     }
 }
 
@@ -682,21 +703,168 @@ static void play_draw(void)
 
 /* ---------------------------------------------------------------- menus -- */
 
-#define ROW_H 46.0f
-#define LIST_TOP 44.0f
+/* The song list looks like a classic phone music library: a title bar,
+ * alphabetical sections with a header that sticks to the top, an A-Z index
+ * down the right, rows of title and artist, and a tab bar.  Two styles:
+ * SKIN_SILVER (light grey bars, a cover tile on each row) and SKIN_BLUE
+ * (blue-grey bars, see-through section headers, text-only rows).  Everything
+ * is drawn with plain fills, so no extra artwork is needed. */
+
+#define NAV_H    44.0f
+#define TAB_H    49.0f
+#define HDR_H    22.0f
+#define ROW_H    44.0f
+#define FOOT_H   52.0f
+#define IDX_W    18.0f
+#define LIST_TOP NAV_H
+#define LIST_BOT (LH - TAB_H)
+
+enum { SKIN_SILVER, SKIN_BLUE, N_SKINS };
+static int skin;                             /* saved in the settings file */
+
+enum { V_SONGS, V_ARTISTS, V_SCORES, N_VIEWS };
+static const char *view_title[N_VIEWS] = { "Songs", "Artists", "Top Scores" };
+
+/* one line of the list: a song row (song >= 0), a section header (-1, hdr
+ * is its letter) or the footer at the end (-2) */
+typedef struct { int song; char hdr; float y, h; } Entry;
+static Entry *ents;
+static int *ord;                             /* the songs of the current view, in order */
+static int n_ents, n_rows, list_view, built_view = -1, list_dirty = 1;
+static float list_total;
+static int touch_row = -1, idx_active, press_zone;
+enum { Z_LIST, Z_NAV, Z_TAB, Z_INDEX };
+
+static long top_best(int song)               /* the best score of any difficulty */
+{
+    long top = 0;
+    int l;
+    for (l = 0; l < 5; l++) {
+        const Best *b = best_of(song, l);
+        if (b && b->score > top) top = b->score;
+    }
+    return top;
+}
+
+static int letter_rank(char c) { return c == '#' ? 26 : c - 'A'; }
+
+static int cmp_view;
+static int song_cmp(const void *pa, const void *pb)
+{
+    int a = *(const int *)pa, b = *(const int *)pb, d;
+    const Song *x = &songs[a], *y = &songs[b];
+    if (cmp_view == V_SCORES) {
+        long sa = top_best(a), sb = top_best(b);
+        if (sa != sb) return sa < sb ? 1 : -1;
+    }
+    if (cmp_view == V_ARTISTS) {
+        if ((d = letter_rank(x->aletter) - letter_rank(y->aletter))) return d;
+        if ((d = strcmp(x->akey, y->akey))) return d;
+    }
+    if ((d = letter_rank(x->tletter) - letter_rank(y->tletter))) return d;
+    if ((d = strcmp(x->tkey, y->tkey))) return d;
+    return a - b;
+}
+
+static int sectioned(void) { return list_view != V_SCORES; }
+
+static void list_build(void)
+{
+    int i, k, n = 0;
+    char last = 0;
+    float y = 0;
+    if (!ents) {
+        ents = malloc(sizeof *ents * (size_t)(n_songs + 30));
+        ord = malloc(sizeof *ord * (size_t)(n_songs + 1));
+        if (!ents || !ord) { free(ents); free(ord); ents = NULL; ord = NULL; return; }
+    }
+    for (i = 0; i < n_songs; i++)
+        if (list_view != V_SCORES || top_best(i) > 0)
+            ord[n++] = i;
+    cmp_view = list_view;
+    qsort(ord, (size_t)n, sizeof *ord, song_cmp);
+    n_ents = 0;
+    for (k = 0; k < n; k++) {
+        const Song *s = &songs[ord[k]];
+        char letter = list_view == V_ARTISTS ? s->aletter : s->tletter;
+        Entry *e;
+        if (sectioned() && letter != last) {
+            e = &ents[n_ents++];
+            e->song = -1; e->hdr = letter; e->y = y; e->h = HDR_H;
+            y += HDR_H;
+            last = letter;
+        }
+        e = &ents[n_ents++];
+        e->song = ord[k]; e->hdr = 0; e->y = y; e->h = ROW_H;
+        y += ROW_H;
+    }
+    ents[n_ents].song = -2; ents[n_ents].hdr = 0; ents[n_ents].y = y; ents[n_ents].h = FOOT_H;
+    n_ents++;
+    list_total = y + FOOT_H;
+    n_rows = n;
+    built_view = list_view;
+    list_dirty = 0;
+}
+
+static int sel_ent(void)
+{
+    int e;
+    for (e = 0; e < n_ents; e++)
+        if (ents[e].song == sel_song && sel_song >= 0)
+            return e;
+    return -1;
+}
+
+static int first_row(void)
+{
+    int e;
+    for (e = 0; e < n_ents; e++)
+        if (ents[e].song >= 0) return e;
+    return -1;
+}
 
 static void list_clamp(void)
 {
-    float max = n_songs * ROW_H - (LH - LIST_TOP);
+    float max = list_total - (LIST_BOT - LIST_TOP);
     if (list_scroll > max) list_scroll = max;
     if (list_scroll < 0) list_scroll = 0;
 }
 
-static void list_show(int i)
+static void list_show(int e)
 {
-    if (i * ROW_H < list_scroll) list_scroll = i * ROW_H;
-    if ((i + 1) * ROW_H > list_scroll + (LH - LIST_TOP)) list_scroll = (i + 1) * ROW_H - (LH - LIST_TOP);
+    float top, bot;
+    if (e < 0 || e >= n_ents) return;
+    top = ents[e].y;
+    if (e > 0 && ents[e - 1].song == -1) top = ents[e - 1].y;   /* show its section header too */
+    else if (sectioned()) top -= HDR_H;                         /* not under the sticky header */
+    bot = ents[e].y + ents[e].h;
+    if (top < list_scroll) list_scroll = top;
+    if (bot > list_scroll + (LIST_BOT - LIST_TOP)) list_scroll = bot - (LIST_BOT - LIST_TOP);
     list_clamp();
+}
+
+static void list_ensure(void)
+{
+    if (!list_dirty && built_view == list_view && ents)
+        return;
+    list_build();
+    if (!ents) return;
+    if (sel_ent() < 0 && first_row() >= 0)
+        sel_song = ents[first_row()].song;
+    list_clamp();
+}
+
+/* which entry is under a point of the screen (-1: none, or the sticky header) */
+static int ent_at(float y)
+{
+    float ly = y - LIST_TOP + list_scroll;
+    int e;
+    if (y < LIST_TOP || y >= LIST_BOT || (sectioned() && y < LIST_TOP + HDR_H))
+        return -1;
+    for (e = 0; e < n_ents; e++)
+        if (ly >= ents[e].y && ly < ents[e].y + ents[e].h)
+            return e;
+    return -1;
 }
 
 static int first_level(int mask, int want)
@@ -713,35 +881,127 @@ static float list_vel;                       /* list glide speed, points per sec
 #define LIST_FRICTION 2.2f                   /* higher = the glide stops sooner */
 #define LIST_MAX_SPEED 6000.0f
 
+static void list_choose(void)
+{
+    sel_level = first_level(songs[sel_song].levels, sel_level ? sel_level : 2);
+    plat_sfx("click");
+    scene = SC_LEVEL;
+}
+
+static void list_set_view(int v)
+{
+    if (v == list_view) return;
+    list_view = v;
+    list_scroll = 0;
+    list_vel = 0;
+    list_ensure();
+    list_show(sel_ent());
+    plat_sfx("click");
+}
+
+static void list_random(void)
+{
+    if (n_rows <= 0) return;
+    srand((unsigned)(now_t * 1000.0));
+    sel_song = ord[rand() % n_rows];
+    list_show(sel_ent());
+    list_choose();
+}
+
+/* the A-Z index: touching a letter jumps to that section, or the next one */
+#define IDX_TOP (LIST_TOP + 6)
+#define IDX_BOT (LIST_BOT - 6)
+static void index_jump(float y)
+{
+    int slot = (int)((y - IDX_TOP) / ((IDX_BOT - IDX_TOP) / 27)), e, last = -1;
+    if (slot < 0) slot = 0;
+    if (slot > 26) slot = 26;
+    for (e = 0; e < n_ents; e++) {
+        if (ents[e].song != -1) continue;
+        last = e;
+        if (letter_rank(ents[e].hdr) >= slot) break;
+    }
+    if (last < 0) return;
+    if (e >= n_ents) e = last;
+    list_scroll = ents[e].y;
+    list_vel = 0;
+    list_clamp();
+    if (e + 1 < n_ents && ents[e + 1].song >= 0)
+        sel_song = ents[e + 1].song;
+}
+
+/* the first row of the section an entry is in */
+static int sec_start(int e)
+{
+    while (e > 0 && ents[e - 1].song >= 0) e--;
+    return e;
+}
+
+static int list_move(int cur, int step)
+{
+    int e, k, last = cur;
+    if (step == -2 || step == 2) {           /* L / R: a section back or forward */
+        if (!sectioned()) step = step < 0 ? -8 : 8;
+        else if (step < 0) {
+            e = sec_start(cur);
+            if (e != cur) return e;
+            e -= 2;                          /* skip this section's header */
+            return e >= 0 && ents[e].song >= 0 ? sec_start(e) : cur;
+        } else {
+            for (e = cur + 1; e < n_ents; e++)
+                if (ents[e].song == -1 && e + 1 < n_ents && ents[e + 1].song >= 0) return e + 1;
+            for (e = n_ents - 1; e > cur; e--)
+                if (ents[e].song >= 0) return e;
+            return cur;
+        }
+    }
+    for (k = 0, e = cur; k < abs(step); k++) {
+        do e += step < 0 ? -1 : 1; while (e >= 0 && e < n_ents && ents[e].song < 0);
+        if (e < 0 || e >= n_ents) break;
+        last = e;
+    }
+    return last;
+}
+
 static void list_update(const PlatInput *in, double dt)
 {
-    int step = 0;
+    int step = 0, cur, e;
+    list_ensure();
+    if (!ents) return;
+    cur = sel_ent();
     if (in->pressed & BTN_UP) { step = -1; repeat_t = 0.35; }
     if (in->pressed & BTN_DOWN) { step = 1; repeat_t = 0.35; }
     if (in->held & (BTN_UP | BTN_DOWN)) {    /* hold to keep scrolling */
         repeat_t -= dt;
         if (repeat_t <= 0) { step = (in->held & BTN_UP) ? -1 : 1; repeat_t = 0.06; }
     }
-    if (in->pressed & BTN_L) step = -8;
-    if (in->pressed & BTN_R) step = 8;
-    if (step) {
-        sel_song += step;
-        if (sel_song < 0) sel_song = 0;
-        if (sel_song >= n_songs) sel_song = n_songs - 1;
-        list_show(sel_song);
-    }
-    if (step)
+    if (in->pressed & BTN_L) step = -2;
+    if (in->pressed & BTN_R) step = 2;
+    if (step && cur >= 0) {
+        sel_song = ents[list_move(cur, step)].song;
+        list_show(sel_ent());
         list_vel = 0;
+    }
+    if (in->pressed & BTN_TRIANGLE) list_set_view((list_view + 1) % N_VIEWS);
+    if (in->pressed & BTN_START) { skin = (skin + 1) % N_SKINS; settings_save(); }
+    if (in->pressed & BTN_SQUARE) { list_random(); return; }
+
     if (ptr.pressed) {
         list_vel = 0;                        /* a finger on the list stops it */
-    } else if (ptr.down) {
+        press_zone = ptr.y < LIST_TOP ? Z_NAV : ptr.y >= LIST_BOT ? Z_TAB :
+                     (sectioned() && ptr.x >= LW - IDX_W - 4) ? Z_INDEX : Z_LIST;
+    }
+    idx_active = ptr.down && press_zone == Z_INDEX;
+    if (idx_active) {
+        index_jump(ptr.y);
+    } else if (ptr.down && !ptr.pressed && press_zone == Z_LIST) {
         float dy = ptr.y - ptr.y0;
         list_scroll -= dy;
         ptr.y0 = ptr.y;
         if (dt > 0.0005)                     /* remember how fast the finger is moving */
             list_vel = list_vel * 0.5f + (float)(-dy / dt) * 0.5f;
         list_clamp();
-    } else if (list_vel != 0) {              /* released: keep gliding and slow down */
+    } else if (!ptr.down && list_vel != 0) { /* released: keep gliding and slow down */
         float before;
         list_scroll += list_vel * (float)dt;
         before = list_scroll;
@@ -752,55 +1012,286 @@ static void list_update(const PlatInput *in, double dt)
     }
     if (list_vel > LIST_MAX_SPEED) list_vel = LIST_MAX_SPEED;
     if (list_vel < -LIST_MAX_SPEED) list_vel = -LIST_MAX_SPEED;
-    if (ptr.released && ptr.moved < 8 && ptr.y > LIST_TOP) {
-        int i = (int)((ptr.y - LIST_TOP + list_scroll) / ROW_H);
-        if (i >= 0 && i < n_songs) {
-            sel_song = i;
-            in = NULL;                       /* fall through to "chosen" */
+
+    touch_row = -1;                          /* the row under a resting finger lights up */
+    if (ptr.down && press_zone == Z_LIST && ptr.moved < 8 && (e = ent_at(ptr.y)) >= 0 && ents[e].song >= 0)
+        touch_row = ents[e].song;
+
+    if (ptr.released && ptr.moved < 8) {
+        if (press_zone == Z_LIST) {
+            e = ent_at(ptr.y);
+            if (e >= 0 && ents[e].song >= 0) {
+                sel_song = ents[e].song;
+                list_choose();
+                return;
+            }
+        } else if (press_zone == Z_NAV && ptr.x < 90) {
+            scene = SC_TITLE;
+            return;
+        } else if (press_zone == Z_NAV && ptr.x > LW - 90) {
+            skin = (skin + 1) % N_SKINS;
+            settings_save();
+        } else if (press_zone == Z_TAB) {
+            int t = (int)(ptr.x / (LW / 4));
+            if (t == 3) { list_random(); return; }
+            if (t >= 0 && t < N_VIEWS) list_set_view(t);
         }
     }
-    if (!in || (in->pressed & BTN_CROSS)) {
-        sel_level = first_level(songs[sel_song].levels, sel_level ? sel_level : 2);
-        plat_sfx("click");
-        scene = SC_LEVEL;
-    } else if (in->pressed & BTN_CIRCLE) {
+    if ((in->pressed & BTN_CROSS) && sel_ent() >= 0)
+        list_choose();
+    else if (in->pressed & BTN_CIRCLE)
         scene = SC_TITLE;
+}
+
+/* ------------------------------------------------------- list drawing -- */
+
+static unsigned mix(unsigned a, unsigned b, float t)
+{
+    unsigned r = 0;
+    int sh;
+    for (sh = 0; sh < 32; sh += 8) {
+        float ca = (float)((a >> sh) & 255), cb = (float)((b >> sh) & 255);
+        r |= (unsigned)(ca + (cb - ca) * t + 0.5f) << sh;
+    }
+    return r;
+}
+
+/* A filled shape built from 1-point strips, its colour going from top to
+ * bottom: rounded corners of radius r, and an optional point on one side
+ * (arrow > 0: pointing left, < 0: pointing right; its size is the depth). */
+static void shape(float x, float y, float w, float h, float r, float arrow, unsigned top, unsigned bot)
+{
+    int i, n = (int)ceilf(h);
+    float lap = (top & 255) == 255 && (bot & 255) == 255 ? 0.15f : 0.0f;   /* hide seams; not when see-through */
+    for (i = 0; i < n; i++) {
+        float yc = i + 0.5f, d, rr = 0, l, rt, sh = i == n - 1 ? h - i : 1.0f + lap;
+        d = yc < r ? r - yc : yc > h - r ? yc - (h - r) : 0;
+        if (d > 0) rr = r - sqrtf(fmaxf(r * r - d * d, 0));
+        l = rt = rr;
+        if (arrow > 0) l = arrow * fabsf(yc - h / 2) / (h / 2);
+        if (arrow < 0) rt = -arrow * fabsf(yc - h / 2) / (h / 2);
+        fill(x + l, y + i, w - l - rt, sh, mix(top, bot, n > 1 ? (float)i / (n - 1) : 0));
+    }
+}
+
+/* text cut to max_w with "..." at the end; bold draws it twice, a hair apart */
+static void text_fit(float x, float y, float size, int align, float max_w, unsigned rgba, const char *s, int bold)
+{
+    char buf[96];
+    if (max_w > 0 && text_width(s, size) > max_w) {
+        size_t n = strlen(s);
+        if (n > sizeof buf - 4) n = sizeof buf - 4;
+        memcpy(buf, s, n);
+        for (;;) {
+            while (n > 0 && buf[n - 1] == ' ') n--;
+            strcpy(buf + n, "...");
+            if (n == 0 || text_width(buf, size) <= max_w) break;
+            n--;
+        }
+        s = buf;
+    }
+    text(x, y, size, align, 0, rgba, s);
+    if (bold) text(x + size * 0.04f, y, size, align, 0, rgba, s);
+}
+
+/* text with a one-point shadow (engraved or embossed look) */
+static void text_sh(float x, float y, float size, int align, float max_w, unsigned rgba, unsigned shadow, float dy, const char *s)
+{
+    text_fit(x, y + dy, size, align, max_w, shadow, s, 1);
+    text_fit(x, y, size, align, max_w, rgba, s, 1);
+}
+
+static void nav_button(float x, float w, float arrow, const char *label)
+{
+    const float y = 7, h = 30;
+    unsigned edge, top, bot, tc, sc;
+    float a = arrow > 0 ? arrow : 0, b = arrow < 0 ? -arrow : 0, sdy;
+    if (skin == SKIN_SILVER) {
+        edge = 0x6b7378ffu; top = 0xdde2e6ffu; bot = 0x9ca6aeffu; tc = 0x4a5156ffu; sc = 0xffffffb0u; sdy = 1;
+    } else if (arrow < 0) {                  /* the black "now playing" style */
+        edge = 0x0a0a0affu; top = 0x4a4a4affu; bot = 0x0c0c0cffu; tc = 0xffffffffu; sc = 0x000000c0u; sdy = -1;
+    } else {
+        edge = 0x34465fffu; top = 0x8fa3c0ffu; bot = 0x4b6592ffu; tc = 0xffffffffu; sc = 0x1d2a3cc0u; sdy = -1;
+    }
+    shape(x, y, w, h, 5, arrow, edge, edge);
+    shape(x + 1, y + 1, w - 2, h - 2, 4, arrow > 0 ? arrow - 1 : arrow < 0 ? arrow + 1 : 0, top, bot);
+    text_sh(x + a + (w - a - b) / 2, y + 7, 14, 1, w - a - b - 6, tc, sc, sdy, label);
+}
+
+static void draw_nav(const char *title)
+{
+    if (skin == SKIN_SILVER) {
+        shape(0, 0, LW, NAV_H, 0, 0, 0xeef0f2ffu, 0xb2bac1ffu);
+        fill(0, 0, LW, 1, 0xfafbfcffu);
+        fill(0, NAV_H - 1, LW, 1, 0x5e656affu);
+        text_sh(LW / 2, 10, 21, 1, LW - 180, 0x4a5156ffu, 0xffffffc0u, 1, title);
+    } else {
+        shape(0, 0, LW, NAV_H, 0, 0, 0xb4c0d1ffu, 0x6c82a1ffu);
+        fill(0, 0, LW, 1, 0xd2dae4ffu);
+        fill(0, NAV_H - 1, LW, 1, 0x2d3642ffu);
+        text_sh(LW / 2, 10, 21, 1, LW - 180, 0xffffffffu, 0x3a4a60d0u, -1, title);
+    }
+    if (skin == SKIN_SILVER) nav_button(6, 64, 11, "Back");
+    else nav_button(6, 60, 0, "Back");
+    nav_button(LW - 70, 64, skin == SKIN_BLUE ? -11 : 0, "Style");
+}
+
+static void draw_header(float y, char letter)
+{
+    char b[2];
+    b[0] = letter; b[1] = 0;
+    if (skin == SKIN_SILVER) {
+        shape(0, y, LW, HDR_H, 0, 0, 0xb7c1c8ffu, 0xa2aeb7ffu);
+        fill(0, y, LW, 1, 0x9aa6afffu);
+        fill(0, y + HDR_H - 1, LW, 1, 0x8f9ba4ffu);
+    } else {                                 /* see-through, the rows show behind it */
+        shape(0, y, LW, HDR_H, 0, 0, 0x9aa6b1d8u, 0x8593a0d8u);
+        fill(0, y + HDR_H - 1, LW, 1, 0x7a8794e0u);
+    }
+    text_sh(11, y + 1, 18, 0, 0, 0xffffffffu, 0x55626cb0u, 1, b);
+}
+
+static void draw_art(float x, float y, int song)
+{
+    static const unsigned pal[8] = {
+        0x8e5b4dffu, 0x4f6d8cffu, 0x6c8a4bffu, 0x8a6aa0ffu, 0xb0874affu, 0x4d8a86ffu, 0x9a4f63ffu, 0x5d5d72ffu
+    };
+    const char *p;
+    unsigned h = 0, c;
+    char b[2] = { '?', 0 };
+    for (p = songs[song].artist; *p; p++) h = h * 31 + (unsigned char)*p;
+    for (p = songs[song].artist; *p; p++)
+        if (isalnum((unsigned char)*p)) { b[0] = (char)toupper((unsigned char)*p); break; }
+    c = pal[h & 7];
+    shape(x, y, ROW_H, ROW_H - 1, 0, 0, c, mix(c, 0x000000ffu, 0.3f));
+    text_fit(x + ROW_H / 2, y + 8, 26, 1, 0, 0xffffffd8u, b, 1);
+}
+
+static void draw_row(float y, int song, int lit, float right)
+{
+    const Song *s = &songs[song];
+    unsigned tc = 0x000000ffu, ac = 0x808080ffu, sc = 0x385487ffu;
+    const char *l1 = list_view == V_ARTISTS ? s->artist : s->title;
+    const char *l2 = list_view == V_ARTISTS ? s->title : s->artist;
+    long top = top_best(song);
+    float tx = skin == SKIN_SILVER ? ROW_H + 8 : 11, sw = 0;
+    char buf[24];
+    if (lit) {
+        shape(0, y, LW, ROW_H, 0, 0, 0x058cf5ffu, 0x015ee6ffu);
+        tc = ac = sc = 0xffffffffu;
+    } else {
+        fill(0, y + ROW_H - 1, LW, 1, 0xd9d9d9ffu);
+    }
+    if (skin == SKIN_SILVER)
+        draw_art(0, y, song);
+    if (top > 0) {
+        snprintf(buf, sizeof buf, "%ld", top);
+        sw = text_width(buf, 14) + 8;
+        text(right, y + 15, 14, 2, 0, sc, buf);
+    }
+    text_fit(tx, y + 3, 20, 0, right - tx - sw, tc, l1, 1);
+    text_fit(tx, y + 24, 15, 0, right - tx - sw, ac, l2, 0);
+}
+
+static void draw_footer(float y)
+{
+    char buf[48];
+    if (list_view == V_SCORES && n_rows == 0)
+        snprintf(buf, sizeof buf, "No scores yet");
+    else
+        snprintf(buf, sizeof buf, "%d %s", n_rows, list_view == V_SCORES ? "Played" : n_rows == 1 ? "Song" : "Songs");
+    text_fit(LW / 2, y + 14, 18, 1, 0, 0x8c8c8cffu, buf, 0);
+}
+
+static void draw_index(void)
+{
+    float step = (IDX_BOT - IDX_TOP) / 27;
+    int k;
+    if (idx_active)
+        shape(LW - IDX_W + 1, LIST_TOP + 2, IDX_W - 3, IDX_BOT - IDX_TOP + 8, (IDX_W - 3) / 2, 0, 0x00000038u, 0x00000038u);
+    for (k = 0; k < 27; k++) {
+        char b[2];
+        b[0] = k < 26 ? (char)('A' + k) : '#'; b[1] = 0;
+        text_fit(LW - IDX_W / 2, IDX_TOP + k * step + (step - 11) / 2, 11, 1, 0, 0x6b7885ffu, b, 1);
+    }
+}
+
+static void tab_icon(int t, float cx, float y, unsigned c)
+{
+    switch (t) {
+    case 0:                                  /* a note */
+        fill(cx + 1, y + 3, 2.5f, 18, c);
+        shape(cx + 1, y + 3, 8, 4, 0, 0, c, c);
+        fill(cx + 7, y + 3, 2, 8, c);
+        shape(cx - 7, y + 16, 10.5f, 8, 4, 0, c, c);
+        break;
+    case 1:                                  /* a person */
+        shape(cx - 5, y + 1, 10, 11, 5, 0, c, c);
+        shape(cx - 10, y + 13, 20, 12, 6, 0, c, c);
+        break;
+    case 2:                                  /* score bars */
+        fill(cx - 10, y + 15, 5, 10, c);
+        fill(cx - 2.5f, y + 8, 5, 17, c);
+        fill(cx + 5, y + 2, 5, 23, c);
+        break;
+    default:                                 /* a die: pick one at random */
+        shape(cx - 10, y + 3, 20, 20, 4, 0, c, c);
+        fill(cx - 6, y + 7, 3.5f, 3.5f, 0x222222ffu);
+        fill(cx + 2.5f, y + 7, 3.5f, 3.5f, 0x222222ffu);
+        fill(cx - 1.75f, y + 11.25f, 3.5f, 3.5f, 0x222222ffu);
+        fill(cx - 6, y + 15.5f, 3.5f, 3.5f, 0x222222ffu);
+        fill(cx + 2.5f, y + 15.5f, 3.5f, 3.5f, 0x222222ffu);
+        break;
+    }
+}
+
+static void draw_tabs(void)
+{
+    static const char *lab[4] = { "Songs", "Artists", "Scores", "Shuffle" };
+    float y = LIST_BOT, tw = LW / 4;
+    int t;
+    shape(0, y, LW, TAB_H / 2, 0, 0, 0x3e3e3effu, 0x1e1e1effu);
+    fill(0, y + TAB_H / 2, LW, TAB_H / 2, 0x0a0a0affu);
+    fill(0, y, LW, 1, 0x111111ffu);
+    fill(0, y + 1, LW, 1, 0x555555ffu);
+    for (t = 0; t < 4; t++) {
+        float x = t * tw;
+        int sel = t == list_view;
+        unsigned ic = !sel ? 0x9a9a9affu : skin == SKIN_BLUE ? 0x3ea6ffffu : 0xffffffffu;
+        if (sel) shape(x + 3, y + 3, tw - 6, TAB_H - 5, 3, 0, 0x5a5a5aa0u, 0x3a3a3aa0u);
+        tab_icon(t, x + tw / 2, y + 4, ic);
+        text_fit(x + tw / 2, y + 32, 11, 1, 0, sel ? 0xffffffffu : 0x9a9a9affu, lab[t], 1);
     }
 }
 
 static void list_draw(void)
 {
-    int i, first = (int)(list_scroll / ROW_H);
-    char buf[64];
-    fill(0, 0, LW, LH, 0x101018ffu);
-    for (i = first; i < n_songs && i < first + 11; i++) {
-        float y = LIST_TOP + i * ROW_H - list_scroll;
-        const Song *s = &songs[i];
-        if (i == sel_song)
-            fill(0, y, LW, ROW_H - 1, 0x2050a0ffu);
-        else if (i & 1)
-            fill(0, y, LW, ROW_H - 1, 0x181824ffu);
-        {
-            long top = 0;
-            int l;
-            char buf[32];
-            for (l = 0; l < 5; l++) {        /* the best of any difficulty */
-                const Best *b = best_of(i, l);
-                if (b && b->score > top) top = b->score;
-            }
-            if (top > 0) {
-                snprintf(buf, sizeof buf, "%ld", top);
-                text(LW - 8, y + 14, 15, 2, 100, 0xffd040ffu, buf);
-                text(10, y + 5, 19, 0, LW - 20 - text_width(buf, 15) - 10, 0xffffffffu, s->title);
-            } else {
-                text(10, y + 5, 19, 0, LW - 20, 0xffffffffu, s->title);
-            }
-        }
-        text(10, y + 26, 14, 0, LW - 20, 0x90a0c0ffu, s->artist);
+    int e, sticky = -1, nxt;
+    float right;
+    list_ensure();
+    fill(0, 0, LW, LH, 0xffffffffu);
+    if (!ents) return;
+    right = LW - (sectioned() ? IDX_W + 4 : 10);
+    for (e = 0; e < n_ents; e++) {
+        float y = LIST_TOP + ents[e].y - list_scroll;
+        if (ents[e].song == -1 && ents[e].y <= list_scroll) sticky = e;
+        if (y + ents[e].h < LIST_TOP || y > LIST_BOT) continue;
+        if (ents[e].song >= 0) draw_row(y, ents[e].song, ents[e].song == sel_song || ents[e].song == touch_row, right);
+        else if (ents[e].song == -1) { if (ents[e].y > list_scroll) draw_header(y, ents[e].hdr); }   /* else the sticky copy covers it */
+        else draw_footer(y);
     }
-    fill(0, 0, LW, LIST_TOP, 0x000000ffu);
-    snprintf(buf, sizeof buf, "Select a song  (%d of %d)", sel_song + 1, n_songs);
-    text(LW / 2, 12, 18, 1, 0, 0xffd040ffu, buf);
+    if (sticky >= 0) {                       /* the current section's header stays on top */
+        float y = LIST_TOP;
+        for (nxt = sticky + 1; nxt < n_ents && ents[nxt].song != -1; nxt++) ;
+        if (nxt < n_ents) {
+            float ny = LIST_TOP + ents[nxt].y - list_scroll;
+            if (ny < LIST_TOP + HDR_H) y = ny - HDR_H;
+        }
+        draw_header(y, ents[sticky].hdr);
+    }
+    if (sectioned()) draw_index();
+    draw_nav(view_title[list_view]);
+    draw_tabs();
 }
 
 static void level_update(const PlatInput *in)
@@ -898,6 +1389,8 @@ static void settings_load(void)
     while (fgets(line, sizeof line, fp)) {
         if (sscanf(line, "tate %d", &level) == 1) {
             tate = level != 0;
+        } else if (sscanf(line, "skin %d", &level) == 1) {
+            skin = level >= 0 && level < N_SKINS ? level : 0;
         } else if (sscanf(line, "best %7s %d %ld %d %d %d", num, &level, &sc, &streak, &hit, &judged) == 6) {
             Best *b;
             song = song_by_num(num);        /* a song no longer present is dropped */
@@ -918,7 +1411,7 @@ static void settings_save(void)
         fprintf(stderr, "cannot write %s\n", plat_save_file());
         return;
     }
-    fprintf(fp, "tate %d\n", tate);
+    fprintf(fp, "tate %d\nskin %d\n", tate, skin);
     for (i = 0; i < n_songs; i++)
         for (l = 0; l < 5; l++) {
             const Best *b = best_of(i, l);
@@ -941,6 +1434,10 @@ int game_init(int sw, int sh)
         return -1;
     settings_load();
     view_setup();                            /* the layout may have come from the file */
+    sel_song = -1;                           /* the list starts on its first row */
+    list_view = V_SONGS;
+    list_scroll = 0;
+    list_dirty = 1;
     scene = SC_TITLE;
     return 0;
 }
@@ -951,8 +1448,10 @@ void game_shutdown(void)
     plat_music_stop();
     theme_free();
     plat_tex_free(tx_bg.t); plat_tex_free(tx_hud.t); plat_tex_free(tx_font.t);
-    free(songs); free(notes); free(bests);
-    songs = NULL; notes = NULL; bests = NULL; n_songs = n_notes = 0;
+    free(songs); free(notes); free(bests); free(ents); free(ord);
+    songs = NULL; notes = NULL; bests = NULL; ents = NULL; ord = NULL;
+    n_songs = n_notes = n_ents = n_rows = 0;
+    built_view = -1;
 }
 
 int game_frame(double dt, const PlatInput *in)
@@ -1022,6 +1521,13 @@ int game_frame(double dt, const PlatInput *in)
 
 void game_debug(char *buf, int n)
 {
-    snprintf(buf, (size_t)n, "scene=%d song=%d level=%d t=%.2f notes=%d score=%ld streak=%d best=%d mult=%d hit=%d judged=%d revenge=%d paused=%d",
+    int e, row = -1, k = 0;
+    if (songs) {                             /* the cursor's place in the list, and its song number */
+        list_ensure();
+        for (e = 0; e < n_ents; e++)
+            if (ents[e].song >= 0) { if (ents[e].song == sel_song) { row = k; break; } k++; }
+    }
+    snprintf(buf, (size_t)n, "row=%d num=%s view=%d skin=%d scene=%d song=%d level=%d t=%.2f notes=%d score=%ld streak=%d best=%d mult=%d hit=%d judged=%d revenge=%d paused=%d",
+             row, sel_song >= 0 && sel_song < n_songs ? songs[sel_song].num : "-", list_view, skin,
              scene, sel_song, sel_level, song_t, n_notes, score, streak, best_streak, mult, n_hit, n_judged, revenge, paused);
 }

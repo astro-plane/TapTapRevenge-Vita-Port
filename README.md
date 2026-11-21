@@ -11,7 +11,10 @@ streaming, **has not been compiled with VitaSDK or run on a Vita yet.**
 
 ## What is in the game
 
-- Song list (343 tracks), difficulty select, results screen
+- Song list (343 tracks) in the style of a classic phone music library:
+  alphabetical sections with an A-Z index, Songs / Artists / Top Scores tabs,
+  a Shuffle button, and two looks to switch between (silver, or blue-grey
+  with see-through section headers). Difficulty select, results screen
 - Each song's own theme (119 of them): background, lane shapes, note art,
   note speed, moving/pulsing scenery, and the colour and light changes on
   streaks, multipliers and misses
@@ -78,7 +81,11 @@ This project's own choices (constants at the top of `src/game.c`):
 | Shake the console, or L / R | W, or Q / E | shake (shake arrows, or start 8x) |
 | START | P | pause; then Circle quits the song |
 | SELECT | R | switch landscape / vertical layout |
-| Up / Down, L / R | arrows | move in the song list (L/R jump 8) |
+| Up / Down, L / R | arrows | move in the song list (L/R: previous / next letter) |
+| Touch the A-Z index | | jump to that letter |
+| Triangle, or the tab bar | | Songs / Artists / Top Scores |
+| Square, or the Shuffle tab | | pick a song at random |
+| START, or the Style button | | switch between the two list looks (saved) |
 | Cross / Circle | Enter / Esc | choose / back |
 
 In the vertical layout, hold the Vita turned a quarter turn clockwise.
