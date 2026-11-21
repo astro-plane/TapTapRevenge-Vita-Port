@@ -325,6 +325,7 @@ src/plat_sdl.c   SDL2 backend: touch, buttons, Ogg music stream, WAV effects
 src/png_load.c   PNG decoding via libpng
 tools/converter_gui.py a window around prep_assets.py (the double-click apps)
 tools/prep_assets.py   .ipa -> app_data/ (songs.txt, charts, audio, themes, gfx, sfx)
+tools/livearea_png.py  art -> 8-bit indexed PNG for sce_sys/ (the icon and LiveArea images)
 tools/theme_dump.lua   runs one theme script and logs what it sets up
 tools/theme_compile.py turns that log into app_data/themes/<name>/theme.txt
 tools/pvrtc.py         decoder for PVRTC-compressed textures
